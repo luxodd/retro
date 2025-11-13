@@ -24,6 +24,21 @@ EJS_gameUrl = "{{GAME_FILE}}"; // ROM/ISO filename
 EJS_threads = typeof SharedArrayBuffer !== "undefined"; // Enable threading if supported
 
 // ============================================
+// AUTO-SAVE CONFIGURATION
+// ============================================
+const AUTO_SAVE_CONFIG = {
+	enabled: true,
+	saveIntervalSeconds: 30,
+	serverUrl: window.location.origin,
+	enableDebugLogs: true,
+	showNotifications: false
+};
+
+let autoSaveTimer = null;
+let saveInProgress = false;
+let lastSaveTimestamp = null;
+
+// ============================================
 // END CONFIGURATION
 // ============================================
 
@@ -55,11 +70,199 @@ const storeEmulator = () => {
 	}
 };
 
+// ============================================
+// AUTO-SAVE HELPER FUNCTIONS
+// ============================================
+const log = (...args) => {
+	if (AUTO_SAVE_CONFIG.enableDebugLogs) {
+		console.log('[AutoSave]', ...args);
+	}
+};
+
+const getGameId = () => {
+	if (!EJS_gameName) return null;
+	return EJS_gameName.toLowerCase().replace(/[^a-z0-9]/g, '-');
+};
+
+const getAuthToken = () => gameToken;
+
+const blobToBase64 = (blob) => {
+	return new Promise((resolve, reject) => {
+		const reader = new FileReader();
+		reader.onloadend = () => resolve(reader.result);
+		reader.onerror = reject;
+		reader.readAsDataURL(blob);
+	});
+};
+
+// Save current game state to backend
+const saveStateToBackend = async () => {
+	if (!AUTO_SAVE_CONFIG.enabled) return;
+	if (saveInProgress) {
+		log('Save already in progress, skipping');
+		return;
+	}
+
+	const token = getAuthToken();
+	const gameId = getGameId();
+	const emulator = getEmulator();
+
+	if (!token) {
+		log('No auth token, cannot save');
+		return;
+	}
+
+	if (!gameId) {
+		log('No game ID, cannot save');
+		return;
+	}
+	if (!emulator || !emulator.gameManager) {
+		log('Emulator not ready, cannot save');
+		return;
+	}
+
+	saveInProgress = true;
+	log(`Saving state for game: ${gameId}`);
+
+	try {
+		const stateBlob = await emulator.gameManager.saveState();
+
+		if (!stateBlob || stateBlob.size === 0) {
+			log('Empty state blob, skipping save');
+			return;
+		}
+
+		const base64Data = await blobToBase64(stateBlob);
+
+
+	const response = await fetch(
+		`${AUTO_SAVE_CONFIG.serverUrl}/api/v1/game-state/save?gameID=${encodeURIComponent(gameId)}`,
+		{
+			method: 'POST',
+			headers: {
+				'Content-Type': 'application/json',
+				'Authorization': `Bearer ${token}`
+			},
+			body: JSON.stringify({
+				stateData: base64Data,
+				compression: 'none'
+			})
+		}
+	);
+
+	if (!response.ok) {
+		throw new Error(`Save failed: ${response.status}`);
+	}
+
+	const result = await response.json();
+	lastSaveTimestamp = Date.now();
+	log('State saved successfully:', result);
+
+} catch (error) {
+	console.error('[AutoSave] Error:', error);
+} finally {
+	saveInProgress = false;
+}
+};
+
+// Load saved game state from backend
+const loadStateFromBackend = async () => {
+	if (!AUTO_SAVE_CONFIG.enabled) return null;
+
+	const token = getAuthToken();
+	const gameId = getGameId();
+
+	if (!gameId) {
+		log('No game ID, cannot load');
+		return null;
+	}
+
+	log(`Loading state for game: ${gameId}`);
+
+	try {
+		const url = new URL(`${AUTO_SAVE_CONFIG.serverUrl}/api/v1/game-state/load`);
+		url.searchParams.set('gameID', gameId);
+
+		const headers = {};
+		if (token) {
+			headers['Authorization'] = `Bearer ${token}`;
+		}
+
+		const response = await fetch(url.toString(), {
+			method: 'GET',
+			headers: headers
+		});
+
+	if (response.status === 404) {
+		log('No saved state found (starting fresh)');
+		return null;
+	}
+
+		if (!response.ok) {
+			throw new Error(`Load failed: ${response.status}`);
+		}
+
+	const stateBlob = await response.blob();
+	log('State loaded successfully, size:', stateBlob.size);
+	return stateBlob;
+	} catch (error) {
+		console.error('[AutoSave] Load error:', error);
+		return null;
+	}
+};
+
+// Start periodic auto-save
+const startAutoSave = () => {
+	if (!AUTO_SAVE_CONFIG.enabled) return;
+
+	if (autoSaveTimer) {
+		clearInterval(autoSaveTimer);
+	}
+
+	log(`Starting auto-save (every ${AUTO_SAVE_CONFIG.saveIntervalSeconds}s)`);
+	
+	autoSaveTimer = setInterval(() => {
+		saveStateToBackend();
+	}, AUTO_SAVE_CONFIG.saveIntervalSeconds * 1000);
+};
+
+
+const stopAutoSave = () => {
+	if (autoSaveTimer) {
+		clearInterval(autoSaveTimer);
+		autoSaveTimer = null;
+		log('Auto-save stopped');
+	}
+};
+	
+
+// ============================================
+// GAME INITIALIZATION (MODIFIED)
+// ============================================
+
 // EmulatorJS callbacks
-const initGame = () => {
+const initGame = async () => {
 	gameLoaded = true;
 	storeEmulator();
+
+	// Try to load saved state before starting timer
+	const savedState = await loadStateFromBackend();
+	if (savedState) {
+		try {
+			const emulator = getEmulator();
+			if (emulator && emulator.gameManager) {
+				log('Restoring saved state...');
+				await emulator.gameManager.loadState(savedState);
+				log('State restored!');
+			}
+		} catch (error) {
+			console.error('[AutoSave] Failed to restore state:', error);
+			log('Starting fresh game instead');
+		}
+	}
+
 	startGameTimer();
+	startAutoSave();
 };
 
 EJS_onGameStart = initGame;
@@ -292,11 +495,16 @@ const startHealthCheck = () => {
 	}, 30000); // Send health check every 30 seconds
 };
 
-// End session with reason
-const endSession = (reason) => {
+// End session with reason (MODIFIED - added auto-save)
+const endSession = async (reason) => {
 	isGameActive = false;
+	
+	// Save one final time before ending
+	await saveStateToBackend();
+	
 	clearInterval(timerInterval);
 	clearInterval(healthCheckInterval);
+	stopAutoSave();
 
 	if (websocket) {
 		websocket.close();
@@ -338,6 +546,9 @@ const handleMessage = (event) => {
 
 // Initialize
 window.addEventListener("message", handleMessage);
+window.addEventListener('beforeunload', () => {
+	stopAutoSave();
+});
 window.onload = () => {
 	updateTimerDisplay();
 	getGameToken();
