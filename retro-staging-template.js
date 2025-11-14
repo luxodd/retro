@@ -86,16 +86,25 @@ const getGameId = () => {
 
 const getAuthToken = () => gameToken;
 
-const blobToBase64 = (blob) => {
-	return new Promise((resolve, reject) => {
-		const reader = new FileReader();
-		reader.onloadend = () => resolve(reader.result);
-		reader.onerror = reject;
-		reader.readAsDataURL(blob);
-	});
+// Helper: Convert Uint8Array to base64
+const uint8ArrayToBase64 = (uint8Array) => {
+	const binary = String.fromCharCode.apply(null, uint8Array);
+	return 'data:application/octet-stream;base64,' + btoa(binary);
 };
 
-// Save current game state to backend
+// Helper: Convert base64 to Uint8Array
+const base64ToUint8Array = (base64) => {
+	// Remove data URL prefix if present
+	const base64Data = base64.replace(/^data:application\/octet-stream;base64,/, '');
+	const binaryString = atob(base64Data);
+	const bytes = new Uint8Array(binaryString.length);
+	for (let i = 0; i < binaryString.length; i++) {
+		bytes[i] = binaryString.charCodeAt(i);
+	}
+	return bytes;
+};
+
+// Save current game state to backend (FIXED VERSION)
 const saveStateToBackend = async () => {
 	if (!AUTO_SAVE_CONFIG.enabled) return;
 	if (saveInProgress) {
@@ -116,6 +125,7 @@ const saveStateToBackend = async () => {
 		log('No game ID, cannot save');
 		return;
 	}
+
 	if (!emulator || !emulator.gameManager) {
 		log('Emulator not ready, cannot save');
 		return;
@@ -125,47 +135,48 @@ const saveStateToBackend = async () => {
 	log(`Saving state for game: ${gameId}`);
 
 	try {
-		const stateBlob = await emulator.gameManager.saveState();
+		// THE FIX: Use getState() instead of saveState() - returns Uint8Array
+		const stateData = emulator.gameManager.getState();
 
-		if (!stateBlob || stateBlob.size === 0) {
-			log('Empty state blob, skipping save');
+		if (!stateData || stateData.length === 0) {
+			log('Empty state data, skipping save');
 			return;
 		}
 
-		const base64Data = await blobToBase64(stateBlob);
+		// Convert Uint8Array to base64
+		const base64Data = uint8ArrayToBase64(stateData);
 
+		const response = await fetch(
+			`${AUTO_SAVE_CONFIG.serverUrl}/api/v1/game-state/save?gameID=${encodeURIComponent(gameId)}`,
+			{
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/json',
+					'Authorization': `Bearer ${token}`
+				},
+				body: JSON.stringify({
+					stateData: base64Data,
+					compression: 'none'
+				})
+			}
+		);
 
-	const response = await fetch(
-		`${AUTO_SAVE_CONFIG.serverUrl}/api/v1/game-state/save?gameID=${encodeURIComponent(gameId)}`,
-		{
-			method: 'POST',
-			headers: {
-				'Content-Type': 'application/json',
-				'Authorization': `Bearer ${token}`
-			},
-			body: JSON.stringify({
-				stateData: base64Data,
-				compression: 'none'
-			})
+		if (!response.ok) {
+			throw new Error(`Save failed: ${response.status}`);
 		}
-	);
 
-	if (!response.ok) {
-		throw new Error(`Save failed: ${response.status}`);
+		const result = await response.json();
+		lastSaveTimestamp = Date.now();
+		log('State saved successfully:', result);
+
+	} catch (error) {
+		console.error('[AutoSave] Error:', error);
+	} finally {
+		saveInProgress = false;
 	}
-
-	const result = await response.json();
-	lastSaveTimestamp = Date.now();
-	log('State saved successfully:', result);
-
-} catch (error) {
-	console.error('[AutoSave] Error:', error);
-} finally {
-	saveInProgress = false;
-}
 };
 
-// Load saved game state from backend
+// Load saved game state from backend (IMPROVED)
 const loadStateFromBackend = async () => {
 	if (!AUTO_SAVE_CONFIG.enabled) return null;
 
@@ -193,18 +204,22 @@ const loadStateFromBackend = async () => {
 			headers: headers
 		});
 
-	if (response.status === 404) {
-		log('No saved state found (starting fresh)');
-		return null;
-	}
+		if (response.status === 404) {
+			log('No saved state found (starting fresh)');
+			return null;
+		}
 
 		if (!response.ok) {
 			throw new Error(`Load failed: ${response.status}`);
 		}
 
-	const stateBlob = await response.blob();
-	log('State loaded successfully, size:', stateBlob.size);
-	return stateBlob;
+		const data = await response.json();
+		
+		// Convert base64 back to Uint8Array
+		const stateData = base64ToUint8Array(data.stateData);
+		
+		log('State loaded successfully, size:', stateData.length);
+		return stateData;
 	} catch (error) {
 		console.error('[AutoSave] Load error:', error);
 		return null;
@@ -252,7 +267,8 @@ const initGame = async () => {
 			const emulator = getEmulator();
 			if (emulator && emulator.gameManager) {
 				log('Restoring saved state...');
-				await emulator.gameManager.loadState(savedState);
+				// Use loadState() with Uint8Array
+				emulator.gameManager.loadState(savedState);
 				log('State restored!');
 			}
 		} catch (error) {
@@ -267,6 +283,15 @@ const initGame = async () => {
 
 EJS_onGameStart = initGame;
 EJS_onLoadState = initGame;
+
+// Hook into manual saves - when user presses save button in emulator
+EJS_onSaveUpdate = function(event) {
+	log('Manual save detected!');
+	// Sync manual saves to backend immediately
+	if (AUTO_SAVE_CONFIG.enabled) {
+		saveStateToBackend();
+	}
+};
 
 // Fallback function to detect when game is ready
 const checkGameReady = () => {
