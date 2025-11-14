@@ -13,7 +13,8 @@ const WARNING_THRESHOLD = 30; // Show warning when timer reaches this value
 // EmulatorJS Configuration
 EJS_player = "#game";
 EJS_core = "{{CORE}}"; // Game console: gba, nes, snes, psx, n64, nds, etc.
-EJS_gameName = "{{GAME_NAME}}"; // Game identifier
+EJS_gameName = "{{GAME_NAME}}"; // Game identifier (display name)
+EJS_gameID = "{{GAME_ID}}"; // Actual database UUID for API calls
 EJS_color = "#0064ff"; // Theme color
 EJS_startOnLoaded = true;
 EJS_pathtodata = "https://cdn.emulatorjs.org/stable/data/";
@@ -80,8 +81,30 @@ const log = (...args) => {
 };
 
 const getGameId = () => {
+	// 1. Use the actual database UUID if provided via template
+	if (typeof EJS_gameID !== 'undefined' && EJS_gameID) {
+		return EJS_gameID;
+	}
+	
+	// 2. Try to extract UUID from current URL path (e.g., /proxy/{uuid}/index.html)
+	try {
+		const urlPath = window.location.pathname;
+		// Match UUID pattern in URL: /proxy/{uuid}/ or /{uuid}/
+		const uuidRegex = /\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\//i;
+		const match = urlPath.match(uuidRegex);
+		if (match && match[1]) {
+			log(`Extracted gameID from URL: ${match[1]}`);
+			return match[1];
+		}
+	} catch (error) {
+		log('Error extracting gameID from URL:', error);
+	}
+	
+	// 3. Fallback to sanitized name for backwards compatibility
 	if (!EJS_gameName) return null;
-	return EJS_gameName.toLowerCase().replace(/[^a-z0-9]/g, '-');
+	const sanitized = EJS_gameName.toLowerCase().replace(/[^a-z0-9]/g, '-');
+	log(`Using fallback gameID (sanitized name): ${sanitized}`);
+	return sanitized;
 };
 
 const getAuthToken = () => gameToken;
