@@ -141,6 +141,7 @@ const saveStateToBackend = async () => {
 
 	saveInProgress = true;
 	log(`Saving state for game: ${gameId}`);
+	log(`Using auth token (length: ${token?.length || 0}):`, token ? token.substring(0, 20) + '...' : 'MISSING');
 
 	try {
 		// THE FIX: Use getState() instead of saveState() - returns Uint8Array
@@ -154,6 +155,8 @@ const saveStateToBackend = async () => {
 		// Convert Uint8Array to base64
 		const base64Data = uint8ArrayToBase64(stateData);
 
+		log(`Sending save request to: ${AUTO_SAVE_CONFIG.serverUrl}/api/v1/game-state/save?gameID=${encodeURIComponent(gameId)}`);
+		
 		const response = await fetch(
 			`${AUTO_SAVE_CONFIG.serverUrl}/api/v1/game-state/save?gameID=${encodeURIComponent(gameId)}`,
 			{
@@ -169,8 +172,12 @@ const saveStateToBackend = async () => {
 			}
 		);
 
+		log(`Save response status: ${response.status}`);
+		
 		if (!response.ok) {
-			throw new Error(`Save failed: ${response.status}`);
+			const errorText = await response.text();
+			log(`Save error response body:`, errorText);
+			throw new Error(`Save failed: ${response.status} - ${errorText}`);
 		}
 
 		const result = await response.json();
@@ -197,6 +204,7 @@ const loadStateFromBackend = async () => {
 	}
 
 	log(`Loading state for game: ${gameId}`);
+	log(`Using auth token for load (length: ${token?.length || 0}):`, token ? token.substring(0, 20) + '...' : 'MISSING');
 
 	try {
 		const url = new URL(`${AUTO_SAVE_CONFIG.serverUrl}/api/v1/game-state/load`);
@@ -207,10 +215,14 @@ const loadStateFromBackend = async () => {
 			headers['Authorization'] = `Bearer ${token}`;
 		}
 
+		log(`Loading from URL: ${url.toString()}`);
+		
 		const response = await fetch(url.toString(), {
 			method: 'GET',
 			headers: headers
 		});
+		
+		log(`Load response status: ${response.status}`);
 
 		if (response.status === 404) {
 			log('No saved state found (starting fresh)');
@@ -221,10 +233,9 @@ const loadStateFromBackend = async () => {
 			throw new Error(`Load failed: ${response.status}`);
 		}
 
-		const data = await response.json();
-		
-		// Convert base64 back to Uint8Array
-		const stateData = base64ToUint8Array(data.stateData);
+		// Backend returns raw binary data, not JSON
+		const arrayBuffer = await response.arrayBuffer();
+		const stateData = new Uint8Array(arrayBuffer);
 		
 		log('State loaded successfully, size:', stateData.length);
 		return stateData;
