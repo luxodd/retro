@@ -86,9 +86,17 @@ const getGameId = () => {
 
 const getAuthToken = () => gameToken;
 
-// Helper: Convert Uint8Array to base64
+// Helper: Convert Uint8Array to base64 (handles large arrays)
 const uint8ArrayToBase64 = (uint8Array) => {
-	const binary = String.fromCharCode.apply(null, uint8Array);
+	// For large arrays, process in chunks to avoid stack overflow
+	const chunkSize = 32768; // 32KB chunks
+	let binary = '';
+	
+	for (let i = 0; i < uint8Array.length; i += chunkSize) {
+		const chunk = uint8Array.subarray(i, Math.min(i + chunkSize, uint8Array.length));
+		binary += String.fromCharCode.apply(null, chunk);
+	}
+	
 	return 'data:application/octet-stream;base64,' + btoa(binary);
 };
 
