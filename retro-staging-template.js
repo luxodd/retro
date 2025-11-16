@@ -617,6 +617,8 @@ const handleMessage = (event) => {
 		end: () => endSession("User ended session"),
 		continue: () => {
 			resetTimer();
+			// Ensure we target the current live emulator instance
+			storeEmulator();
 			resumeGame();
 		},
 		restart: restartGame,
