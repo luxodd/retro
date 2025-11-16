@@ -10,6 +10,14 @@ const GAME_TIMER_SECONDS = (() => {
 })();
 const WARNING_THRESHOLD = 30; // Show warning when timer reaches this value
 
+// Enable death-triggered end-of-session if URL includes ?deaths=true|1|yes
+const DEATHS_ENABLED = (() => {
+	const urlParams = new URLSearchParams(window.location.search);
+	const v = (urlParams.get("deaths") || "").toLowerCase();
+	return v === "1" || v === "true" || v === "yes";
+})();
+window.DEATHS_ENABLED = DEATHS_ENABLED;
+
 // EmulatorJS Configuration
 EJS_player = "#game";
 EJS_core = "{{CORE}}"; // Game console: gba, nes, snes, psx, n64, nds, etc.
@@ -364,12 +372,15 @@ const updateTimerDisplay = () => {
 		.padStart(2, "0")}`;
 };
 
-const handleTimerExpired = () => {
+// Universal end-of-session trigger (formerly handleTimerExpired)
+const inGameTrx = () => {
 	pauseGame();
 	if (window.parent !== window) {
 		window.parent.postMessage({ type: "session_options" }, "*");
 	}
 };
+// Expose globally so game-specific pages can trigger it (e.g., death/continues exhausted)
+window.inGameTrx = inGameTrx;
 
 const startGameTimer = () => {
 	if (!GAME_TIMER_SECONDS || timerStarted) return;
@@ -385,7 +396,7 @@ const startGameTimer = () => {
 
 		if (gameTimer <= 0) {
 			clearInterval(timerInterval);
-			handleTimerExpired();
+			inGameTrx();
 		}
 	}, 1000);
 };
