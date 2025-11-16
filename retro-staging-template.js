@@ -17,6 +17,7 @@ const DEATHS_ENABLED = (() => {
 	return v === "1" || v === "true" || v === "yes";
 })();
 window.DEATHS_ENABLED = DEATHS_ENABLED;
+console.log('[RetroTemplate] DEATHS_ENABLED =', DEATHS_ENABLED);
 
 // EmulatorJS Configuration
 EJS_player = "#game";
@@ -374,6 +375,7 @@ const updateTimerDisplay = () => {
 
 // Universal end-of-session trigger (formerly handleTimerExpired)
 const inGameTrx = () => {
+	console.log('[RetroTemplate] inGameTrx() invoked');
 	pauseGame();
 	if (window.parent !== window) {
 		window.parent.postMessage({ type: "session_options" }, "*");
@@ -396,6 +398,7 @@ const startGameTimer = () => {
 
 		if (gameTimer <= 0) {
 			clearInterval(timerInterval);
+			console.log('[RetroTemplate] Timer expired -> inGameTrx()');
 			inGameTrx();
 		}
 	}, 1000);
