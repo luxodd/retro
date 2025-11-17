@@ -715,7 +715,13 @@ const handleMessage = (event) => {
 	// Handle JWT token
 	if (event.data.jwt) {
 		gameToken = event.data.jwt;
-		return;
+		// Initialize WebSocket if we now have a token and it's not already open/connecting
+		try {
+			if (!websocket || (websocket.readyState !== WebSocket.OPEN && websocket.readyState !== WebSocket.CONNECTING)) {
+				initializeWebSocket();
+			}
+		} catch {}
+		// Do not return; allow combined messages (e.g., { jwt, type: 'continue' }) to proceed
 	}
 
 	// Handle action messages (support a few shapes: {action}, {type:'continue'}, {payload:{action}})
