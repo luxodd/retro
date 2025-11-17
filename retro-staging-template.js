@@ -620,6 +620,8 @@ const handleMessage = (event) => {
 			// Ensure we target the current live emulator instance
 			storeEmulator();
 			resumeGame();
+			// Minimal safety: try once more shortly after overlays settle
+			setTimeout(() => { storeEmulator(); resumeGame(); }, 200);
 		},
 		restart: restartGame,
 	};
