@@ -733,58 +733,8 @@ const handleMessage = (event) => {
 	const actions = {
 		end: () => endSession("User ended session"),
 		continue: () => {
-			console.log('[RetroTemplate] Continue received: attempting to resume');
 			resetTimer();
-			// Log raw event data once to confirm message shape (debug)
-			try { console.log('[RetroTemplate] Continue payload sample:', event.data); } catch {}
-			// Try to refocus canvas (helps resume on some browsers)
-			const canvas = document.querySelector('#game canvas');
-			if (canvas) {
-				try {
-					canvas.focus();
-					canvas.click();
-					console.log('[RetroTemplate] Focused/clicked game canvas');
-				} catch (e) { /* no-op */ }
-			}
-
-			// Ensure we target the current live emulator instance
-			storeEmulator();
-			// Emit emulator capability snapshot
-			try {
-				const emu0 = getEmulator();
-				console.log('[RetroTemplate] Emulator before resume:', {
-					hasPause: !!emu0?.pause,
-					hasPlay: !!emu0?.play,
-					hasGameManager: !!emu0?.gameManager,
-				});
-			} catch {}
-
-			const a = resumeGame();
-			console.log('[RetroTemplate] Resume attempt #1:', a ? 'success' : 'failed');
-			if (!a) {
-				// Stagger a couple of retries while UI settles
-				setTimeout(() => {
-					storeEmulator();
-					const b = resumeGame();
-					console.log('[RetroTemplate] Resume attempt #2:', b ? 'success' : 'failed');
-					if (!b) {
-						requestAnimationFrame(() => {
-							storeEmulator();
-							const c = resumeGame();
-							console.log('[RetroTemplate] Resume attempt #3 (rAF):', c ? 'success' : 'failed');
-						});
-					}
-				}, 150);
-				setTimeout(() => {
-					storeEmulator();
-					const d = resumeGame();
-					console.log('[RetroTemplate] Resume attempt #4:', d ? 'success' : 'failed');
-					if (!d) {
-						console.log('[RetroTemplate] Showing resume overlay to capture user gesture');
-						showResumeOverlay();
-					}
-				}, 400);
-			}
+			resumeGame();
 		},
 		restart: restartGame,
 	};
