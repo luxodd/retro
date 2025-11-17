@@ -10,30 +10,6 @@ const GAME_TIMER_SECONDS = (() => {
 })();
 const WARNING_THRESHOLD = 30; // Show warning when timer reaches this value
 
-// Template/version identifier (update when making template-level changes)
-const TEMPLATE_VERSION = 'retro-staging-template:60ff2991-2025-11-16';
-
-// Enable death-triggered end-of-session if URL includes ?deaths=true|1|yes
-const DEATHS_ENABLED = (() => {
-	const urlParams = new URLSearchParams(window.location.search);
-	const v = (urlParams.get("deaths") || "").toLowerCase();
-	return v === "1" || v === "true" || v === "yes";
-})();
-window.DEATHS_ENABLED = DEATHS_ENABLED;
-console.log('[RetroTemplate] DEATHS_ENABLED =', DEATHS_ENABLED);
-console.log('[RetroTemplate] Version =', TEMPLATE_VERSION);
-
-// Optional flag: do not end session due to WebSocket failures (enable via ?wsNoEnd=1)
-const WS_NO_END_ON_FAILURE = (() => {
-	try {
-		const p = new URLSearchParams(window.location.search);
-		const v = (p.get('wsNoEnd') || '').toLowerCase();
-		return v === '1' || v === 'true' || v === 'yes';
-	} catch {}
-	return false;
-})();
-try { if (WS_NO_END_ON_FAILURE) console.log('[RetroTemplate][WS] wsNoEnd enabled: will not end session on WS failures'); } catch {}
-
 // EmulatorJS Configuration
 EJS_player = "#game";
 EJS_core = "{{CORE}}"; // Game console: gba, nes, snes, psx, n64, nds, etc.
@@ -43,7 +19,12 @@ EJS_color = "#0064ff"; // Theme color
 EJS_startOnLoaded = true;
 EJS_pathtodata = "https://cdn.emulatorjs.org/stable/data/";
 EJS_gameUrl = "{{GAME_FILE}}"; // ROM/ISO filename
-{{LOAD_STATE_URL}}EJS_language = "en-US"; // Force English US locale
+{
+	{
+		LOAD_STATE_URL;
+	}
+}
+EJS_language = "en-US"; // Force English US locale
 
 // Performance Optimizations
 EJS_threads = typeof SharedArrayBuffer !== "undefined"; // Enable threading if supported
@@ -56,7 +37,7 @@ const AUTO_SAVE_CONFIG = {
 	saveIntervalSeconds: 30,
 	serverUrl: window.location.origin,
 	enableDebugLogs: true,
-	showNotifications: false
+	showNotifications: false,
 };
 
 let autoSaveTimer = null;
@@ -80,7 +61,6 @@ let healthCheckInterval;
 let healthCheckFailures = 0;
 const maxHealthCheckFailures = 3;
 let isGameActive = true;
-let healthCheckCount = 0; // number of health pings sent this session
 
 // Cache DOM elements
 const timerOverlay = document.getElementById("timer-overlay");
@@ -101,33 +81,34 @@ const storeEmulator = () => {
 // ============================================
 const log = (...args) => {
 	if (AUTO_SAVE_CONFIG.enableDebugLogs) {
-		console.log('[AutoSave]', ...args);
+		console.log("[AutoSave]", ...args);
 	}
 };
 
 const getGameId = () => {
 	// 1. Use the actual database UUID if provided via template
-	if (typeof EJS_gameID !== 'undefined' && EJS_gameID) {
+	if (typeof EJS_gameID !== "undefined" && EJS_gameID) {
 		return EJS_gameID;
 	}
-	
+
 	// 2. Try to extract UUID from current URL path (e.g., /proxy/{uuid}/index.html)
 	try {
 		const urlPath = window.location.pathname;
 		// Match UUID pattern in URL: /proxy/{uuid}/ or /{uuid}/
-		const uuidRegex = /\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\//i;
+		const uuidRegex =
+			/\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\//i;
 		const match = urlPath.match(uuidRegex);
 		if (match && match[1]) {
 			log(`Extracted gameID from URL: ${match[1]}`);
 			return match[1];
 		}
 	} catch (error) {
-		log('Error extracting gameID from URL:', error);
+		log("Error extracting gameID from URL:", error);
 	}
-	
+
 	// 3. Fallback to sanitized name for backwards compatibility
 	if (!EJS_gameName) return null;
-	const sanitized = EJS_gameName.toLowerCase().replace(/[^a-z0-9]/g, '-');
+	const sanitized = EJS_gameName.toLowerCase().replace(/[^a-z0-9]/g, "-");
 	log(`Using fallback gameID (sanitized name): ${sanitized}`);
 	return sanitized;
 };
@@ -138,20 +119,26 @@ const getAuthToken = () => gameToken;
 const uint8ArrayToBase64 = (uint8Array) => {
 	// For large arrays, process in chunks to avoid stack overflow
 	const chunkSize = 32768; // 32KB chunks
-	let binary = '';
-	
+	let binary = "";
+
 	for (let i = 0; i < uint8Array.length; i += chunkSize) {
-		const chunk = uint8Array.subarray(i, Math.min(i + chunkSize, uint8Array.length));
+		const chunk = uint8Array.subarray(
+			i,
+			Math.min(i + chunkSize, uint8Array.length)
+		);
 		binary += String.fromCharCode.apply(null, chunk);
 	}
-	
-	return 'data:application/octet-stream;base64,' + btoa(binary);
+
+	return "data:application/octet-stream;base64," + btoa(binary);
 };
 
 // Helper: Convert base64 to Uint8Array
 const base64ToUint8Array = (base64) => {
 	// Remove data URL prefix if present
-	const base64Data = base64.replace(/^data:application\/octet-stream;base64,/, '');
+	const base64Data = base64.replace(
+		/^data:application\/octet-stream;base64,/,
+		""
+	);
 	const binaryString = atob(base64Data);
 	const bytes = new Uint8Array(binaryString.length);
 	for (let i = 0; i < binaryString.length; i++) {
@@ -164,7 +151,7 @@ const base64ToUint8Array = (base64) => {
 const saveStateToBackend = async () => {
 	if (!AUTO_SAVE_CONFIG.enabled) return;
 	if (saveInProgress) {
-		log('Save already in progress, skipping');
+		log("Save already in progress, skipping");
 		return;
 	}
 
@@ -173,55 +160,64 @@ const saveStateToBackend = async () => {
 	const emulator = getEmulator();
 
 	if (!token) {
-		log('No auth token, cannot save');
+		log("No auth token, cannot save");
 		return;
 	}
 
 	if (!gameId) {
-		log('No game ID, cannot save');
+		log("No game ID, cannot save");
 		return;
 	}
 
 	if (!emulator || !emulator.gameManager) {
-		log('Emulator not ready, cannot save');
+		log("Emulator not ready, cannot save");
 		return;
 	}
 
 	saveInProgress = true;
 	log(`Saving state for game: ${gameId}`);
-	log(`Using auth token (length: ${token?.length || 0}):`, token ? token.substring(0, 20) + '...' : 'MISSING');
+	log(
+		`Using auth token (length: ${token?.length || 0}):`,
+		token ? token.substring(0, 20) + "..." : "MISSING"
+	);
 
 	try {
 		// THE FIX: Use getState() instead of saveState() - returns Uint8Array
 		const stateData = emulator.gameManager.getState();
 
 		if (!stateData || stateData.length === 0) {
-			log('Empty state data, skipping save');
+			log("Empty state data, skipping save");
 			return;
 		}
 
 		// Convert Uint8Array to base64
 		const base64Data = uint8ArrayToBase64(stateData);
 
-		log(`Sending save request to: ${AUTO_SAVE_CONFIG.serverUrl}/api/v1/game-state/save?gameID=${encodeURIComponent(gameId)}`);
-		
+		log(
+			`Sending save request to: ${
+				AUTO_SAVE_CONFIG.serverUrl
+			}/api/v1/game-state/save?gameID=${encodeURIComponent(gameId)}`
+		);
+
 		const response = await fetch(
-			`${AUTO_SAVE_CONFIG.serverUrl}/api/v1/game-state/save?gameID=${encodeURIComponent(gameId)}`,
+			`${
+				AUTO_SAVE_CONFIG.serverUrl
+			}/api/v1/game-state/save?gameID=${encodeURIComponent(gameId)}`,
 			{
-				method: 'POST',
+				method: "POST",
 				headers: {
-					'Content-Type': 'application/json',
-					'Authorization': `Bearer ${token}`
+					"Content-Type": "application/json",
+					Authorization: `Bearer ${token}`,
 				},
 				body: JSON.stringify({
 					stateData: base64Data,
-					compression: 'none'
-				})
+					compression: "none",
+				}),
 			}
 		);
 
 		log(`Save response status: ${response.status}`);
-		
+
 		if (!response.ok) {
 			const errorText = await response.text();
 			log(`Save error response body:`, errorText);
@@ -230,10 +226,9 @@ const saveStateToBackend = async () => {
 
 		const result = await response.json();
 		lastSaveTimestamp = Date.now();
-		log('State saved successfully:', result);
-
+		log("State saved successfully:", result);
 	} catch (error) {
-		console.error('[AutoSave] Error:', error);
+		console.error("[AutoSave] Error:", error);
 	} finally {
 		saveInProgress = false;
 	}
@@ -247,33 +242,36 @@ const loadStateFromBackend = async () => {
 	const gameId = getGameId();
 
 	if (!gameId) {
-		log('No game ID, cannot load');
+		log("No game ID, cannot load");
 		return null;
 	}
 
 	log(`Loading state for game: ${gameId}`);
-	log(`Using auth token for load (length: ${token?.length || 0}):`, token ? token.substring(0, 20) + '...' : 'MISSING');
+	log(
+		`Using auth token for load (length: ${token?.length || 0}):`,
+		token ? token.substring(0, 20) + "..." : "MISSING"
+	);
 
 	try {
 		const url = new URL(`${AUTO_SAVE_CONFIG.serverUrl}/api/v1/game-state/load`);
-		url.searchParams.set('gameID', gameId);
+		url.searchParams.set("gameID", gameId);
 
 		const headers = {};
 		if (token) {
-			headers['Authorization'] = `Bearer ${token}`;
+			headers["Authorization"] = `Bearer ${token}`;
 		}
 
 		log(`Loading from URL: ${url.toString()}`);
-		
+
 		const response = await fetch(url.toString(), {
-			method: 'GET',
-			headers: headers
+			method: "GET",
+			headers: headers,
 		});
-		
+
 		log(`Load response status: ${response.status}`);
 
 		if (response.status === 404) {
-			log('No saved state found (starting fresh)');
+			log("No saved state found (starting fresh)");
 			return null;
 		}
 
@@ -284,11 +282,11 @@ const loadStateFromBackend = async () => {
 		// Backend returns raw binary data, not JSON
 		const arrayBuffer = await response.arrayBuffer();
 		const stateData = new Uint8Array(arrayBuffer);
-		
-		log('State loaded successfully, size:', stateData.length);
+
+		log("State loaded successfully, size:", stateData.length);
 		return stateData;
 	} catch (error) {
-		console.error('[AutoSave] Load error:', error);
+		console.error("[AutoSave] Load error:", error);
 		return null;
 	}
 };
@@ -302,21 +300,19 @@ const startAutoSave = () => {
 	}
 
 	log(`Starting auto-save (every ${AUTO_SAVE_CONFIG.saveIntervalSeconds}s)`);
-	
+
 	autoSaveTimer = setInterval(() => {
 		saveStateToBackend();
 	}, AUTO_SAVE_CONFIG.saveIntervalSeconds * 1000);
 };
 
-
 const stopAutoSave = () => {
 	if (autoSaveTimer) {
 		clearInterval(autoSaveTimer);
 		autoSaveTimer = null;
-		log('Auto-save stopped');
+		log("Auto-save stopped");
 	}
 };
-	
 
 // ============================================
 // GAME INITIALIZATION (MODIFIED)
@@ -326,9 +322,6 @@ const stopAutoSave = () => {
 const initGame = async () => {
 	gameLoaded = true;
 	storeEmulator();
-	try {
-		console.log('[RetroTemplate] Session start - version:', TEMPLATE_VERSION);
-	} catch {}
 
 	// Try to load saved state before starting timer
 	const savedState = await loadStateFromBackend();
@@ -336,14 +329,14 @@ const initGame = async () => {
 		try {
 			const emulator = getEmulator();
 			if (emulator && emulator.gameManager) {
-				log('Restoring saved state...');
+				log("Restoring saved state...");
 				// Use loadState() with Uint8Array
 				emulator.gameManager.loadState(savedState);
-				log('State restored!');
+				log("State restored!");
 			}
 		} catch (error) {
-			console.error('[AutoSave] Failed to restore state:', error);
-			log('Starting fresh game instead');
+			console.error("[AutoSave] Failed to restore state:", error);
+			log("Starting fresh game instead");
 		}
 	}
 
@@ -355,8 +348,8 @@ EJS_onGameStart = initGame;
 EJS_onLoadState = initGame;
 
 // Hook into manual saves - when user presses save button in emulator
-EJS_onSaveUpdate = function(event) {
-	log('Manual save detected!');
+EJS_onSaveUpdate = function (event) {
+	log("Manual save detected!");
 	// Sync manual saves to backend immediately
 	if (AUTO_SAVE_CONFIG.enabled) {
 		saveStateToBackend();
@@ -392,25 +385,12 @@ const updateTimerDisplay = () => {
 		.padStart(2, "0")}`;
 };
 
-// Universal end-of-session trigger (formerly handleTimerExpired)
-const inGameTrx = () => {
-	console.log('[RetroTemplate] inGameTrx() invoked');
+const handleTimerExpired = () => {
 	pauseGame();
-	try {
-		const emu = getEmulator();
-		console.log('[RetroTemplate] Post-pause emulator snapshot:', {
-			hasPause: !!emu?.pause,
-			hasPlay: !!emu?.play,
-			hasGameManager: !!emu?.gameManager,
-			gmMethods: emu?.gameManager ? Object.keys(emu.gameManager).slice(0, 10) : [],
-		});
-	} catch (e) {}
 	if (window.parent !== window) {
 		window.parent.postMessage({ type: "session_options" }, "*");
 	}
 };
-// Expose globally so game-specific pages can trigger it (e.g., death/continues exhausted)
-window.inGameTrx = inGameTrx;
 
 const startGameTimer = () => {
 	if (!GAME_TIMER_SECONDS || timerStarted) return;
@@ -426,8 +406,7 @@ const startGameTimer = () => {
 
 		if (gameTimer <= 0) {
 			clearInterval(timerInterval);
-			console.log('[RetroTemplate] Timer expired -> inGameTrx()');
-			inGameTrx();
+			handleTimerExpired();
 		}
 	}, 1000);
 };
@@ -480,34 +459,6 @@ const resumeGame = () => {
 
 const restartGame = () => window.location.reload();
 
-// Lightweight overlay to capture a real user gesture and resume
-let resumeOverlayEl = null;
-const showResumeOverlay = () => {
-	if (resumeOverlayEl) return resumeOverlayEl;
-	const overlay = document.createElement('div');
-	overlay.id = 'resume-overlay';
-	Object.assign(overlay.style, {
-		position: 'fixed', inset: '0', background: 'rgba(0,0,0,0.35)',
-		display: 'flex', alignItems: 'center', justifyContent: 'center',
-		color: '#fff', fontFamily: 'Arial, sans-serif', fontSize: '18px',
-		zIndex: 2147483647, cursor: 'pointer', userSelect: 'none'
-	});
-	overlay.textContent = 'Click to resume';
-	overlay.addEventListener('click', () => {
-		try {
-			storeEmulator();
-			const ok = resumeGame();
-			console.log('[RetroTemplate] Resume via user click:', ok ? 'success' : 'failed');
-		} finally {
-			overlay.remove();
-			resumeOverlayEl = null;
-		}
-	}, { once: true });
-	document.body.appendChild(overlay);
-	resumeOverlayEl = overlay;
-	return overlay;
-};
-
 // Token management
 const getGameToken = () => {
 	const urlParams = new URLSearchParams(window.location.search);
@@ -516,24 +467,14 @@ const getGameToken = () => {
 	if (!token) {
 		// Try to get token from parent window message
 		window.addEventListener("message", function (event) {
-			const data = event.data || {};
-			// Accept multiple shapes: {jwt}, {token}, {authToken}, {type:'jwt', token|value}, {payload:{jwt|token}}
-			const incoming = data.jwt
-				|| data.token
-				|| data.authToken
-				|| (data.type === 'jwt' && (data.value || data.token))
-				|| (data.payload && (data.payload.jwt || data.payload.token));
-			if (incoming) {
-				token = incoming;
+			if (event.data && event.data.jwt) {
+				token = event.data.jwt;
 				gameToken = token;
-				try { console.log('[RetroTemplate][WS] JWT received from parent (len):', String(token).length); } catch {}
 				initializeWebSocket();
 			}
 		});
-		try { console.log('[RetroTemplate][WS] Waiting for parent to send JWT'); } catch {}
 	} else {
 		gameToken = token;
-		try { console.log('[RetroTemplate][WS] JWT found in URL (len):', String(token).length); } catch {}
 		initializeWebSocket();
 	}
 
@@ -546,14 +487,6 @@ const initializeWebSocket = () => {
 		console.error("No game token available");
 		return;
 	}
-
-	// Avoid opening multiple sockets if already connecting/open
-	try {
-		if (websocket && (websocket.readyState === WebSocket.CONNECTING || websocket.readyState === WebSocket.OPEN)) {
-			console.log('[RetroTemplate][WS] Already connecting/open, skipping init');
-			return;
-		}
-	} catch {}
 
 	// Get the parent window's origin for WebSocket connection
 	let serverHost;
@@ -570,13 +503,11 @@ const initializeWebSocket = () => {
 	}
 
 	const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-	const wsUrl = `${protocol}//${serverHost}/ws?token=${encodeURIComponent(gameToken)}`;
-	try { console.log('[RetroTemplate][WS] connecting to', wsUrl); } catch {}
+	const wsUrl = `${protocol}//${serverHost}/ws?token=${gameToken}`;
 
 	websocket = new WebSocket(wsUrl);
 
 	websocket.onopen = function (event) {
-		try { console.log('[RetroTemplate][WS] open - starting health checks'); } catch {}
 		startHealthCheck();
 	};
 
@@ -586,8 +517,15 @@ const initializeWebSocket = () => {
 	};
 
 	websocket.onclose = function (event) {
-		try { console.log('[RetroTemplate][WS] close', { code: event.code, reason: event.reason }); } catch {}
-		// Do not enforce health check failures on the client; server is source of truth
+		// Only count failures after game has loaded
+		if (gameLoaded) {
+			healthCheckFailures++;
+
+			if (healthCheckFailures >= maxHealthCheckFailures) {
+				endSession("Connection lost");
+				return;
+			}
+		}
 
 		if (isGameActive) {
 			// Try to reconnect after 5 seconds
@@ -596,37 +534,30 @@ const initializeWebSocket = () => {
 	};
 
 	websocket.onerror = function (error) {
-		try { console.log('[RetroTemplate][WS] error', error); } catch {}
-		// Do not enforce health check failures on the client; server is source of truth
+		// Only count failures after game has loaded
+		if (gameLoaded) {
+			healthCheckFailures++;
+
+			if (healthCheckFailures >= maxHealthCheckFailures) {
+				endSession("Connection error");
+			}
+		}
 	};
 };
 
 // Handle WebSocket messages
 const handleWebSocketMessage = (message) => {
-	try {
-		if (message && typeof message.type === 'string' && message.type.toLowerCase().includes('health')) {
-			console.log('[RetroTemplate][WS] message (health-related):', message.type);
-		}
-	} catch {}
 	switch (message.type) {
 		case "health_status_check_response":
-			try {
-				console.log('[RetroTemplate][WS][Health] ack received', {
-					at: new Date().toISOString(),
-					payloadKeys: message && typeof message === 'object' ? Object.keys(message) : []
-				});
-			} catch {}
-			break;
-		default:
-			try { console.log('[RetroTemplate][WS] message (unhandled type):', message && message.type); } catch {}
+			// Reset health check failures on successful response
+			healthCheckFailures = 0;
 			break;
 	}
 };
 
 // Send WebSocket message
 const sendWebSocketMessage = (type, payload = null) => {
-	const isOpen = websocket && websocket.readyState === WebSocket.OPEN;
-	if (isOpen) {
+	if (websocket && websocket.readyState === WebSocket.OPEN) {
 		const message = {
 			msgver: "1",
 			type: type,
@@ -639,53 +570,26 @@ const sendWebSocketMessage = (type, payload = null) => {
 			message.payload = payload;
 		}
 
-		if (type === 'health_status_check') {
-			try {
-				console.log('[RetroTemplate][WS][Health] send', {
-					n: ++healthCheckCount,
-					at: message.ts
-				});
-			} catch {}
-		}
-
 		websocket.send(JSON.stringify(message));
-	} else if (type === 'health_status_check') {
-		try {
-			console.log('[RetroTemplate][WS][Health] send skipped (socket not open)', {
-				readyState: websocket ? websocket.readyState : 'no-socket'
-			});
-		} catch {}
 	}
 };
 
 // Start health check
 const startHealthCheck = () => {
-	// Ensure only one health check loop is running
-	if (healthCheckInterval) {
-		clearInterval(healthCheckInterval);
-		healthCheckInterval = null;
-	}
-
-	// Send an immediate health check as soon as possible
-	if (isGameActive) {
-		try { sendWebSocketMessage("health_status_check", {}); } catch {}
-	}
-
-	// Then continue every 30 seconds
 	healthCheckInterval = setInterval(function () {
 		if (isGameActive) {
 			sendWebSocketMessage("health_status_check", {});
 		}
-	}, 30000);
+	}, 30000); // Send health check every 30 seconds
 };
 
 // End session with reason (MODIFIED - added auto-save)
 const endSession = async (reason) => {
 	isGameActive = false;
-	
+
 	// Save one final time before ending
 	await saveStateToBackend();
-	
+
 	clearInterval(timerInterval);
 	clearInterval(healthCheckInterval);
 	stopAutoSave();
@@ -709,27 +613,13 @@ const handleMessage = (event) => {
 	// Handle JWT token
 	if (event.data.jwt) {
 		gameToken = event.data.jwt;
-		// Initialize WebSocket if we now have a token and it's not already open/connecting
-		try {
-			if (!websocket || (websocket.readyState !== WebSocket.OPEN && websocket.readyState !== WebSocket.CONNECTING)) {
-				initializeWebSocket();
-			}
-		} catch {}
-		// Do not return; allow combined messages (e.g., { jwt, type: 'continue' }) to proceed
-	}
-
-	// Handle action messages (support a few shapes: {action}, {type:'continue'}, {payload:{action}})
-	const payload = event.data || {};
-	const action = payload.action
-		|| (payload.payload && payload.payload.action)
-		|| (payload.type === 'continue' ? 'continue'
-			: payload.type === 'end' ? 'end'
-			: payload.type === 'restart' ? 'restart'
-			: null);
-	if (!action) {
-		// Not an actionable message for the game; ignore
 		return;
 	}
+
+	// Handle action messages
+	const { action } = event.data;
+	if (!action) return;
+
 	const actions = {
 		end: () => endSession("User ended session"),
 		continue: () => {
@@ -743,19 +633,11 @@ const handleMessage = (event) => {
 };
 
 // Initialize
-// Global message tap for diagnostics (non-invasive)
-window.addEventListener('message', (e) => {
-	try {
-		console.log('[RetroTemplate] raw message received:', { origin: e.origin, keys: Object.keys(e.data || {}), data: e.data });
-	} catch {}
-});
 window.addEventListener("message", handleMessage);
-window.addEventListener('beforeunload', () => {
+window.addEventListener("beforeunload", () => {
 	stopAutoSave();
 });
 window.onload = () => {
 	updateTimerDisplay();
+	getGameToken();
 };
-
-// Kick off token retrieval immediately so we don't miss early parent messages
-try { getGameToken(); } catch {}
