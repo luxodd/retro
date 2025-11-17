@@ -613,11 +613,23 @@ const sendWebSocketMessage = (type, payload = null) => {
 
 // Start health check
 const startHealthCheck = () => {
+	// Ensure only one health check loop is running
+	if (healthCheckInterval) {
+		clearInterval(healthCheckInterval);
+		healthCheckInterval = null;
+	}
+
+	// Send an immediate health check as soon as possible
+	if (isGameActive) {
+		try { sendWebSocketMessage("health_status_check", {}); } catch {}
+	}
+
+	// Then continue every 30 seconds
 	healthCheckInterval = setInterval(function () {
 		if (isGameActive) {
 			sendWebSocketMessage("health_status_check", {});
 		}
-	}, 30000); // Send health check every 30 seconds
+	}, 30000);
 };
 
 // End session with reason (MODIFIED - added auto-save)
