@@ -69,6 +69,7 @@ let healthCheckInterval;
 let healthCheckFailures = 0;
 const maxHealthCheckFailures = 3;
 let isGameActive = true;
+let healthCheckCount = 0; // number of health pings sent this session
 
 // Cache DOM elements
 const timerOverlay = document.getElementById("timer-overlay");
@@ -586,6 +587,12 @@ const initializeWebSocket = () => {
 const handleWebSocketMessage = (message) => {
 	switch (message.type) {
 		case "health_status_check_response":
+			try {
+				console.log('[RetroTemplate][WS][Health] ack received', {
+					at: new Date().toISOString(),
+					payloadKeys: message && typeof message === 'object' ? Object.keys(message) : []
+				});
+			} catch {}
 			// Reset health check failures on successful response
 			healthCheckFailures = 0;
 			break;
@@ -594,7 +601,8 @@ const handleWebSocketMessage = (message) => {
 
 // Send WebSocket message
 const sendWebSocketMessage = (type, payload = null) => {
-	if (websocket && websocket.readyState === WebSocket.OPEN) {
+	const isOpen = websocket && websocket.readyState === WebSocket.OPEN;
+	if (isOpen) {
 		const message = {
 			msgver: "1",
 			type: type,
@@ -607,7 +615,22 @@ const sendWebSocketMessage = (type, payload = null) => {
 			message.payload = payload;
 		}
 
+		if (type === 'health_status_check') {
+			try {
+				console.log('[RetroTemplate][WS][Health] send', {
+					n: ++healthCheckCount,
+					at: message.ts
+				});
+			} catch {}
+		}
+
 		websocket.send(JSON.stringify(message));
+	} else if (type === 'health_status_check') {
+		try {
+			console.log('[RetroTemplate][WS][Health] send skipped (socket not open)', {
+				readyState: websocket ? websocket.readyState : 'no-socket'
+			});
+		} catch {}
 	}
 };
 
