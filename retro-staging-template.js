@@ -70,6 +70,7 @@ let healthCheckFailures = 0;
 const maxHealthCheckFailures = 3;
 let isGameActive = true;
 let healthCheckCount = 0; // number of health pings sent this session
+let wsEverOpened = false; // only end session on WS failure if we successfully connected at least once
 
 // Cache DOM elements
 const timerOverlay = document.getElementById("timer-overlay");
@@ -559,13 +560,42 @@ const initializeWebSocket = () => {
 	}
 
 	const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-	const wsUrl = `${protocol}//${serverHost}/ws?token=${encodeURIComponent(gameToken)}`;
-	try { console.log('[RetroTemplate][WS] connecting to', wsUrl); } catch {}
+	// Allow overrides via query params: wsUrl (full), or wsHost + wsPath
+	try {
+		const p = new URLSearchParams(window.location.search);
+		const fullOverride = p.get('wsUrl');
+		const hostOverride = p.get('wsHost');
+		const pathOverride = p.get('wsPath');
+		let wsUrl;
+		if (fullOverride) {
+			wsUrl = fullOverride.includes('{token}')
+				? fullOverride.replace('{token}', encodeURIComponent(gameToken))
+				: fullOverride + (fullOverride.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(gameToken);
+			try { console.log('[RetroTemplate][WS] using wsUrl override:', wsUrl); } catch {}
+		} else {
+			const wsHost = hostOverride || serverHost;
+			const wsPath = pathOverride || '/ws';
+			wsUrl = `${protocol}//${wsHost}${wsPath}?token=${encodeURIComponent(gameToken)}`;
+		}
+		try { 
+			console.log('[RetroTemplate][WS] origins', { iframeOrigin: window.location.origin, referrer: document.referrer });
+			console.log('[RetroTemplate][WS] connecting to', wsUrl);
+		} catch {}
 
-	websocket = new WebSocket(wsUrl);
+		websocket = new WebSocket(wsUrl);
+	} catch (e) {
+		console.error('[RetroTemplate][WS] failed to construct WebSocket URL', e);
+		return;
+	}
 
 	websocket.onopen = function (event) {
 		try { console.log('[RetroTemplate][WS] open - starting health checks'); } catch {}
+		wsEverOpened = true;
+		// Send a heartbeat immediately on open and log it; interval will follow
+		try {
+			console.log('[RetroTemplate][WS][Health] immediate heartbeat on open');
+			sendWebSocketMessage('health_status_check', {});
+		} catch {}
 		startHealthCheck();
 	};
 
@@ -580,7 +610,7 @@ const initializeWebSocket = () => {
 		if (gameLoaded) {
 			healthCheckFailures++;
 
-			if (healthCheckFailures >= maxHealthCheckFailures) {
+			if (wsEverOpened && healthCheckFailures >= maxHealthCheckFailures) {
 				endSession("Connection lost");
 				return;
 			}
@@ -598,7 +628,7 @@ const initializeWebSocket = () => {
 		if (gameLoaded) {
 			healthCheckFailures++;
 
-			if (healthCheckFailures >= maxHealthCheckFailures) {
+			if (wsEverOpened && healthCheckFailures >= maxHealthCheckFailures) {
 				endSession("Connection error");
 			}
 		}
@@ -670,11 +700,6 @@ const startHealthCheck = () => {
 	if (healthCheckInterval) {
 		clearInterval(healthCheckInterval);
 		healthCheckInterval = null;
-	}
-
-	// Send an immediate health check as soon as possible
-	if (isGameActive) {
-		try { sendWebSocketMessage("health_status_check", {}); } catch {}
 	}
 
 	// Then continue every 30 seconds
