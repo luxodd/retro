@@ -386,6 +386,15 @@ const updateTimerDisplay = () => {
 const inGameTrx = () => {
 	console.log('[RetroTemplate] inGameTrx() invoked');
 	pauseGame();
+	try {
+		const emu = getEmulator();
+		console.log('[RetroTemplate] Post-pause emulator snapshot:', {
+			hasPause: !!emu?.pause,
+			hasPlay: !!emu?.play,
+			hasGameManager: !!emu?.gameManager,
+			gmMethods: emu?.gameManager ? Object.keys(emu.gameManager).slice(0, 10) : [],
+		});
+	} catch (e) {}
 	if (window.parent !== window) {
 		window.parent.postMessage({ type: "session_options" }, "*");
 	}
@@ -477,7 +486,8 @@ const showResumeOverlay = () => {
 	overlay.addEventListener('click', () => {
 		try {
 			storeEmulator();
-			resumeGame();
+			const ok = resumeGame();
+			console.log('[RetroTemplate] Resume via user click:', ok ? 'success' : 'failed');
 		} finally {
 			overlay.remove();
 			resumeOverlayEl = null;
@@ -556,7 +566,6 @@ const initializeWebSocket = () => {
 		const fullOverride = p.get('wsUrl');
 		const hostOverride = p.get('wsHost');
 		const pathOverride = p.get('wsPath');
-		const protoOverride = p.get('wsProto'); // optional Sec-WebSocket-Protocol value; supports {token}
 		let wsUrl;
 		if (fullOverride) {
 			wsUrl = fullOverride.includes('{token}')
@@ -568,18 +577,12 @@ const initializeWebSocket = () => {
 			const wsPath = pathOverride || '/ws';
 			wsUrl = `${protocol}//${wsHost}${wsPath}?token=${encodeURIComponent(gameToken)}`;
 		}
-		try {
-			console.log('[RetroTemplate][WS] connecting to', wsUrl, protoOverride ? `(protocol: ${protoOverride})` : '');
+		try { 
+			console.log('[RetroTemplate][WS] origins', { iframeOrigin: window.location.origin, referrer: document.referrer });
+			console.log('[RetroTemplate][WS] connecting to', wsUrl);
 		} catch {}
 
-		// Build protocols array if wsProto override present
-		let protocols = undefined;
-		if (protoOverride) {
-			const filled = protoOverride.replace('{token}', encodeURIComponent(gameToken));
-			protocols = [filled];
-		}
-
-		websocket = protocols ? new WebSocket(wsUrl, protocols) : new WebSocket(wsUrl);
+		websocket = new WebSocket(wsUrl);
 	} catch (e) {
 		console.error('[RetroTemplate][WS] failed to construct WebSocket URL', e);
 		return;
@@ -674,7 +677,7 @@ const sendWebSocketMessage = (type, payload = null) => {
 
 		if (type === 'health_status_check') {
 			try {
-				console.log('[RetroTemplate][WS][Health] check-in sent', {
+				console.log('[RetroTemplate][WS][Health] send', {
 					n: ++healthCheckCount,
 					at: message.ts
 				});
@@ -684,8 +687,7 @@ const sendWebSocketMessage = (type, payload = null) => {
 		websocket.send(JSON.stringify(message));
 	} else if (type === 'health_status_check') {
 		try {
-			console.log('[RetroTemplate][WS][Health] check-in missed (socket not open)', {
-				at: new Date().toISOString(),
+			console.log('[RetroTemplate][WS][Health] send skipped (socket not open)', {
 				readyState: websocket ? websocket.readyState : 'no-socket'
 			});
 		} catch {}
@@ -758,34 +760,52 @@ const handleMessage = (event) => {
 		continue: () => {
 			console.log('[RetroTemplate] Continue received: attempting to resume');
 			resetTimer();
+			// Log raw event data once to confirm message shape (debug)
+			try { console.log('[RetroTemplate] Continue payload sample:', event.data); } catch {}
 			// Try to refocus canvas (helps resume on some browsers)
 			const canvas = document.querySelector('#game canvas');
 			if (canvas) {
 				try {
 					canvas.focus();
 					canvas.click();
+					console.log('[RetroTemplate] Focused/clicked game canvas');
 				} catch (e) { /* no-op */ }
 			}
 
 			// Ensure we target the current live emulator instance
 			storeEmulator();
+			// Emit emulator capability snapshot
+			try {
+				const emu0 = getEmulator();
+				console.log('[RetroTemplate] Emulator before resume:', {
+					hasPause: !!emu0?.pause,
+					hasPlay: !!emu0?.play,
+					hasGameManager: !!emu0?.gameManager,
+				});
+			} catch {}
 
 			const a = resumeGame();
+			console.log('[RetroTemplate] Resume attempt #1:', a ? 'success' : 'failed');
 			if (!a) {
 				// Stagger a couple of retries while UI settles
 				setTimeout(() => {
 					storeEmulator();
 					const b = resumeGame();
+					console.log('[RetroTemplate] Resume attempt #2:', b ? 'success' : 'failed');
 					if (!b) {
 						requestAnimationFrame(() => {
 							storeEmulator();
-							resumeGame();
+							const c = resumeGame();
+							console.log('[RetroTemplate] Resume attempt #3 (rAF):', c ? 'success' : 'failed');
 						});
 					}
 				}, 150);
 				setTimeout(() => {
 					storeEmulator();
-					if (!resumeGame()) {
+					const d = resumeGame();
+					console.log('[RetroTemplate] Resume attempt #4:', d ? 'success' : 'failed');
+					if (!d) {
+						console.log('[RetroTemplate] Showing resume overlay to capture user gesture');
 						showResumeOverlay();
 					}
 				}, 400);
@@ -798,6 +818,12 @@ const handleMessage = (event) => {
 };
 
 // Initialize
+// Global message tap for diagnostics (non-invasive)
+window.addEventListener('message', (e) => {
+	try {
+		console.log('[RetroTemplate] raw message received:', { origin: e.origin, keys: Object.keys(e.data || {}), data: e.data });
+	} catch {}
+});
 window.addEventListener("message", handleMessage);
 window.addEventListener('beforeunload', () => {
 	stopAutoSave();
