@@ -68,6 +68,9 @@ let websocket;
 let healthCheckInterval;
 let healthCheckFailures = 0;
 const maxHealthCheckFailures = 3;
+// Track failures per-connection to avoid counting both onerror and onclose
+let wsFailureCounted = false;
+let wsConnectionSeq = 0;
 let isGameActive = true;
 
 // Cache DOM elements
@@ -593,10 +596,17 @@ const initializeWebSocket = () => {
 
 	const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
 	const wsUrl = `${protocol}//${serverHost}/ws?token=${gameToken}`;
+	try { console.log('[RetroTemplate][WS] connecting to', wsUrl); } catch {}
 
 	websocket = new WebSocket(wsUrl);
+	const thisSeq = ++wsConnectionSeq;
+	wsFailureCounted = false;
 
 	websocket.onopen = function (event) {
+		try { console.log('[RetroTemplate][WS] open', { seq: thisSeq }); } catch {}
+		// On successful connection, reset failures
+		healthCheckFailures = 0;
+		wsFailureCounted = false;
 		startHealthCheck();
 	};
 
@@ -606,10 +616,12 @@ const initializeWebSocket = () => {
 	};
 
 	websocket.onclose = function (event) {
-		// Only count failures after game has loaded
-		if (gameLoaded) {
+		try { console.log('[RetroTemplate][WS] close', { seq: thisSeq, code: event.code, reason: event.reason }); } catch {}
+		// Only count one failure per connection lifecycle
+		if (gameLoaded && !wsFailureCounted) {
 			healthCheckFailures++;
-
+			wsFailureCounted = true;
+			try { console.log('[RetroTemplate][WS] failure count =', healthCheckFailures); } catch {}
 			if (healthCheckFailures >= maxHealthCheckFailures) {
 				endSession("Connection lost");
 				return;
@@ -623,10 +635,12 @@ const initializeWebSocket = () => {
 	};
 
 	websocket.onerror = function (error) {
-		// Only count failures after game has loaded
-		if (gameLoaded) {
+		try { console.log('[RetroTemplate][WS] error', { seq: thisSeq, error }); } catch {}
+		// Only count one failure per connection lifecycle
+		if (gameLoaded && !wsFailureCounted) {
 			healthCheckFailures++;
-
+			wsFailureCounted = true;
+			try { console.log('[RetroTemplate][WS] failure count =', healthCheckFailures); } catch {}
 			if (healthCheckFailures >= maxHealthCheckFailures) {
 				endSession("Connection error");
 			}
