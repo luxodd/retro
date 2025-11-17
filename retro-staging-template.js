@@ -377,6 +377,15 @@ const updateTimerDisplay = () => {
 const inGameTrx = () => {
 	console.log('[RetroTemplate] inGameTrx() invoked');
 	pauseGame();
+	try {
+		const emu = getEmulator();
+		console.log('[RetroTemplate] Post-pause emulator snapshot:', {
+			hasPause: !!emu?.pause,
+			hasPlay: !!emu?.play,
+			hasGameManager: !!emu?.gameManager,
+			gmMethods: emu?.gameManager ? Object.keys(emu.gameManager).slice(0, 10) : [],
+		});
+	} catch (e) {}
 	if (window.parent !== window) {
 		window.parent.postMessage({ type: "session_options" }, "*");
 	}
@@ -451,6 +460,34 @@ const resumeGame = () => {
 };
 
 const restartGame = () => window.location.reload();
+
+// Lightweight overlay to capture a real user gesture and resume
+let resumeOverlayEl = null;
+const showResumeOverlay = () => {
+	if (resumeOverlayEl) return resumeOverlayEl;
+	const overlay = document.createElement('div');
+	overlay.id = 'resume-overlay';
+	Object.assign(overlay.style, {
+		position: 'fixed', inset: '0', background: 'rgba(0,0,0,0.35)',
+		display: 'flex', alignItems: 'center', justifyContent: 'center',
+		color: '#fff', fontFamily: 'Arial, sans-serif', fontSize: '18px',
+		zIndex: 2147483647, cursor: 'pointer', userSelect: 'none'
+	});
+	overlay.textContent = 'Click to resume';
+	overlay.addEventListener('click', () => {
+		try {
+			storeEmulator();
+			const ok = resumeGame();
+			console.log('[RetroTemplate] Resume via user click:', ok ? 'success' : 'failed');
+		} finally {
+			overlay.remove();
+			resumeOverlayEl = null;
+		}
+	}, { once: true });
+	document.body.appendChild(overlay);
+	resumeOverlayEl = overlay;
+	return overlay;
+};
 
 // Token management
 const getGameToken = () => {
@@ -609,14 +646,25 @@ const handleMessage = (event) => {
 		return;
 	}
 
-	// Handle action messages
-	const { action } = event.data;
-	if (!action) return;
+	// Handle action messages (support a few shapes: {action}, {type:'continue'}, {payload:{action}})
+	const payload = event.data || {};
+	const action = payload.action
+		|| (payload.payload && payload.payload.action)
+		|| (payload.type === 'continue' ? 'continue'
+			: payload.type === 'end' ? 'end'
+			: payload.type === 'restart' ? 'restart'
+			: null);
+	if (!action) {
+		// Not an actionable message for the game; ignore
+		return;
+	}
 	const actions = {
 		end: () => endSession("User ended session"),
 		continue: () => {
 			console.log('[RetroTemplate] Continue received: attempting to resume');
 			resetTimer();
+			// Log raw event data once to confirm message shape (debug)
+			try { console.log('[RetroTemplate] Continue payload sample:', event.data); } catch {}
 			// Try to refocus canvas (helps resume on some browsers)
 			const canvas = document.querySelector('#game canvas');
 			if (canvas) {
@@ -629,6 +677,16 @@ const handleMessage = (event) => {
 
 			// Ensure we target the current live emulator instance
 			storeEmulator();
+			// Emit emulator capability snapshot
+			try {
+				const emu0 = getEmulator();
+				console.log('[RetroTemplate] Emulator before resume:', {
+					hasPause: !!emu0?.pause,
+					hasPlay: !!emu0?.play,
+					hasGameManager: !!emu0?.gameManager,
+				});
+			} catch {}
+
 			const a = resumeGame();
 			console.log('[RetroTemplate] Resume attempt #1:', a ? 'success' : 'failed');
 			if (!a) {
@@ -645,7 +703,15 @@ const handleMessage = (event) => {
 						});
 					}
 				}, 150);
-				setTimeout(() => { storeEmulator(); const d = resumeGame(); console.log('[RetroTemplate] Resume attempt #4:', d ? 'success' : 'failed'); }, 400);
+				setTimeout(() => {
+					storeEmulator();
+					const d = resumeGame();
+					console.log('[RetroTemplate] Resume attempt #4:', d ? 'success' : 'failed');
+					if (!d) {
+						console.log('[RetroTemplate] Showing resume overlay to capture user gesture');
+						showResumeOverlay();
+					}
+				}, 400);
 			}
 		},
 		restart: restartGame,
@@ -655,6 +721,12 @@ const handleMessage = (event) => {
 };
 
 // Initialize
+// Global message tap for diagnostics (non-invasive)
+window.addEventListener('message', (e) => {
+	try {
+		console.log('[RetroTemplate] raw message received:', { origin: e.origin, keys: Object.keys(e.data || {}), data: e.data });
+	} catch {}
+});
 window.addEventListener("message", handleMessage);
 window.addEventListener('beforeunload', () => {
 	stopAutoSave();
