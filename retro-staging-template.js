@@ -11,7 +11,7 @@ const GAME_TIMER_SECONDS = (() => {
 const WARNING_THRESHOLD = 30; // Show warning when timer reaches this value
 
 // Template/version identifier (update when making template-level changes)
-const TEMPLATE_VERSION = 'retro-staging-template:60ff2990-2025-11-16';
+const TEMPLATE_VERSION = 'retro-staging-template:60ff2991-2025-11-16';
 
 // Enable death-triggered end-of-session if URL includes ?deaths=true|1|yes
 const DEATHS_ENABLED = (() => {
