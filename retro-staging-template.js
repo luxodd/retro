@@ -546,6 +546,7 @@ const initializeWebSocket = () => {
 	websocket = new WebSocket(wsUrl);
 
 	websocket.onopen = function (event) {
+		try { console.log('[RetroTemplate][WS] open - starting health checks'); } catch {}
 		startHealthCheck();
 	};
 
@@ -585,6 +586,11 @@ const initializeWebSocket = () => {
 
 // Handle WebSocket messages
 const handleWebSocketMessage = (message) => {
+	try {
+		if (message && typeof message.type === 'string' && message.type.toLowerCase().includes('health')) {
+			console.log('[RetroTemplate][WS] message (health-related):', message.type);
+		}
+	} catch {}
 	switch (message.type) {
 		case "health_status_check_response":
 			try {
@@ -595,6 +601,9 @@ const handleWebSocketMessage = (message) => {
 			} catch {}
 			// Reset health check failures on successful response
 			healthCheckFailures = 0;
+			break;
+		default:
+			try { console.log('[RetroTemplate][WS] message (unhandled type):', message && message.type); } catch {}
 			break;
 	}
 };
