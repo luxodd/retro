@@ -451,19 +451,68 @@ const pauseGame = () => {
 	return false;
 };
 
+// Try to resume any web audio contexts we can find (helps with autoplay policies)
+const resumeAudioContexts = () => {
+	let resumed = false;
+	const AC = window.AudioContext || window.webkitAudioContext;
+	try {
+		// Common places where EmulatorJS might stash its AudioContext
+		const emu = getEmulator();
+		const candidates = [
+			emu?.audio?.context,
+			emu?.audio_context,
+			window.EmulatorJS?.audioContext,
+			window.EmulatorJS?.audioCtx,
+			window.EJS_audioContext,
+		].filter(Boolean);
+
+		for (const ctx of candidates) {
+			if (AC && ctx instanceof AC && ctx.state === 'suspended' && typeof ctx.resume === 'function') {
+				ctx.resume()?.catch?.(() => {});
+				resumed = true;
+			}
+		}
+	} catch {}
+	return resumed;
+};
+
 const resumeGame = () => {
-	const emulator = getEmulator();
-	if (emulator?.play) {
-		emulator.play();
-		return true;
-	}
+	const tryMethods = (emu) => {
+		if (!emu) return false;
+		const candidates = [
+			emu.play,
+			emu.resume,
+			emu.start,
+			emu.togglePause ? () => emu.togglePause(false) : null,
+			emu.gameManager?.resume,
+			emu.gameManager?.play,
+			emu.gameManager?.unpause,
+			emu.gameManager?.setPause ? () => emu.gameManager.setPause(false) : null,
+		].filter(Boolean);
+		for (const fn of candidates) {
+			try {
+				const result = fn.call(emu.gameManager && fn === emu.gameManager?.resume || fn === emu.gameManager?.play || fn === emu.gameManager?.unpause || fn === emu.gameManager?.setPause ? emu.gameManager : emu);
+				// If the call didn't throw, assume success; some APIs return void
+				return true;
+			} catch {}
+		}
+		return false;
+	};
+
+	// First pass on current handle
+	let ok = tryMethods(getEmulator());
+	// Try to resume audio contexts as well
+	const audioResumed = resumeAudioContexts();
+	if (ok) return true;
+
+	// Refresh emulator reference and retry
 	storeEmulator();
-	const retryEmulator = getEmulator();
-	if (retryEmulator?.play) {
-		retryEmulator.play();
-		return true;
+	ok = tryMethods(getEmulator()) || ok;
+	if (!ok && audioResumed) {
+		// Give audio a tick to wake up then try again
+		try { setTimeout(() => { tryMethods(getEmulator()); }, 50); } catch {}
 	}
-	return false;
+	return ok;
 };
 
 const restartGame = () => window.location.reload();
@@ -481,16 +530,19 @@ const showResumeOverlay = () => {
 		zIndex: 2147483647, cursor: 'pointer', userSelect: 'none'
 	});
 	overlay.textContent = 'Click to resume';
-	overlay.addEventListener('click', () => {
-		try {
-			storeEmulator();
-			const ok = resumeGame();
-			console.log('[RetroTemplate] Resume via user click:', ok ? 'success' : 'failed');
-		} finally {
+	const onClick = () => {
+		storeEmulator();
+		const ok = resumeGame();
+		console.log('[RetroTemplate] Resume via user click:', ok ? 'success' : 'failed');
+		if (ok) {
 			overlay.remove();
 			resumeOverlayEl = null;
+		} else {
+			// Keep overlay if failed; prompt user to click again (captures gesture until it works)
+			overlay.textContent = 'Click again to resume';
 		}
-	}, { once: true });
+	};
+	overlay.addEventListener('click', onClick);
 	document.body.appendChild(overlay);
 	resumeOverlayEl = overlay;
 	return overlay;
