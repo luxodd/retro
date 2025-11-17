@@ -10,6 +10,9 @@ const GAME_TIMER_SECONDS = (() => {
 })();
 const WARNING_THRESHOLD = 30; // Show warning when timer reaches this value
 
+// Template/version identifier (update when making template-level changes)
+const TEMPLATE_VERSION = 'retro-staging-template:60ff2990-2025-11-16';
+
 // Enable death-triggered end-of-session if URL includes ?deaths=true|1|yes
 const DEATHS_ENABLED = (() => {
 	const urlParams = new URLSearchParams(window.location.search);
@@ -18,6 +21,7 @@ const DEATHS_ENABLED = (() => {
 })();
 window.DEATHS_ENABLED = DEATHS_ENABLED;
 console.log('[RetroTemplate] DEATHS_ENABLED =', DEATHS_ENABLED);
+console.log('[RetroTemplate] Version =', TEMPLATE_VERSION);
 
 // EmulatorJS Configuration
 EJS_player = "#game";
@@ -310,6 +314,9 @@ const stopAutoSave = () => {
 const initGame = async () => {
 	gameLoaded = true;
 	storeEmulator();
+	try {
+		console.log('[RetroTemplate] Session start - version:', TEMPLATE_VERSION);
+	} catch {}
 
 	// Try to load saved state before starting timer
 	const savedState = await loadStateFromBackend();
