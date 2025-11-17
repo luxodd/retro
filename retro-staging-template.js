@@ -505,9 +505,17 @@ const getGameToken = () => {
 	if (!token) {
 		// Try to get token from parent window message
 		window.addEventListener("message", function (event) {
-			if (event.data && event.data.jwt) {
-				token = event.data.jwt;
+			const data = event.data || {};
+			// Accept multiple shapes: {jwt}, {token}, {authToken}, {type:'jwt', token|value}, {payload:{jwt|token}}
+			const incoming = data.jwt
+				|| data.token
+				|| data.authToken
+				|| (data.type === 'jwt' && (data.value || data.token))
+				|| (data.payload && (data.payload.jwt || data.payload.token));
+			if (incoming) {
+				token = incoming;
 				gameToken = token;
+				try { console.log('[RetroTemplate][WS] JWT received from parent (len):', String(token).length); } catch {}
 				initializeWebSocket();
 			}
 		});
@@ -541,7 +549,8 @@ const initializeWebSocket = () => {
 	}
 
 	const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-	const wsUrl = `${protocol}//${serverHost}/ws?token=${gameToken}`;
+	const wsUrl = `${protocol}//${serverHost}/ws?token=${encodeURIComponent(gameToken)}`;
+	try { console.log('[RetroTemplate][WS] connecting to', wsUrl); } catch {}
 
 	websocket = new WebSocket(wsUrl);
 
@@ -556,6 +565,7 @@ const initializeWebSocket = () => {
 	};
 
 	websocket.onclose = function (event) {
+		try { console.log('[RetroTemplate][WS] close', { code: event.code, reason: event.reason }); } catch {}
 		// Only count failures after game has loaded
 		if (gameLoaded) {
 			healthCheckFailures++;
@@ -573,6 +583,7 @@ const initializeWebSocket = () => {
 	};
 
 	websocket.onerror = function (error) {
+		try { console.log('[RetroTemplate][WS] error', error); } catch {}
 		// Only count failures after game has loaded
 		if (gameLoaded) {
 			healthCheckFailures++;
