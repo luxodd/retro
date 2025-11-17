@@ -519,8 +519,10 @@ const getGameToken = () => {
 				initializeWebSocket();
 			}
 		});
+		try { console.log('[RetroTemplate][WS] Waiting for parent to send JWT'); } catch {}
 	} else {
 		gameToken = token;
+		try { console.log('[RetroTemplate][WS] JWT found in URL (len):', String(token).length); } catch {}
 		initializeWebSocket();
 	}
 
@@ -533,6 +535,14 @@ const initializeWebSocket = () => {
 		console.error("No game token available");
 		return;
 	}
+
+	// Avoid opening multiple sockets if already connecting/open
+	try {
+		if (websocket && (websocket.readyState === WebSocket.CONNECTING || websocket.readyState === WebSocket.OPEN)) {
+			console.log('[RetroTemplate][WS] Already connecting/open, skipping init');
+			return;
+		}
+	} catch {}
 
 	// Get the parent window's origin for WebSocket connection
 	let serverHost;
@@ -795,5 +805,7 @@ window.addEventListener('beforeunload', () => {
 });
 window.onload = () => {
 	updateTimerDisplay();
-	getGameToken();
 };
+
+// Kick off token retrieval immediately so we don't miss early parent messages
+try { getGameToken(); } catch {}
