@@ -23,6 +23,17 @@ window.DEATHS_ENABLED = DEATHS_ENABLED;
 console.log('[RetroTemplate] DEATHS_ENABLED =', DEATHS_ENABLED);
 console.log('[RetroTemplate] Version =', TEMPLATE_VERSION);
 
+// Optional flag: do not end session due to WebSocket failures (enable via ?wsNoEnd=1)
+const WS_NO_END_ON_FAILURE = (() => {
+	try {
+		const p = new URLSearchParams(window.location.search);
+		const v = (p.get('wsNoEnd') || '').toLowerCase();
+		return v === '1' || v === 'true' || v === 'yes';
+	} catch {}
+	return false;
+})();
+try { if (WS_NO_END_ON_FAILURE) console.log('[RetroTemplate][WS] wsNoEnd enabled: will not end session on WS failures'); } catch {}
+
 // EmulatorJS Configuration
 EJS_player = "#game";
 EJS_core = "{{CORE}}"; // Game console: gba, nes, snes, psx, n64, nds, etc.
@@ -576,15 +587,7 @@ const initializeWebSocket = () => {
 
 	websocket.onclose = function (event) {
 		try { console.log('[RetroTemplate][WS] close', { code: event.code, reason: event.reason }); } catch {}
-		// Only count failures after game has loaded
-		if (gameLoaded) {
-			healthCheckFailures++;
-
-			if (healthCheckFailures >= maxHealthCheckFailures) {
-				endSession("Connection lost");
-				return;
-			}
-		}
+		// Do not enforce health check failures on the client; server is source of truth
 
 		if (isGameActive) {
 			// Try to reconnect after 5 seconds
@@ -594,14 +597,7 @@ const initializeWebSocket = () => {
 
 	websocket.onerror = function (error) {
 		try { console.log('[RetroTemplate][WS] error', error); } catch {}
-		// Only count failures after game has loaded
-		if (gameLoaded) {
-			healthCheckFailures++;
-
-			if (healthCheckFailures >= maxHealthCheckFailures) {
-				endSession("Connection error");
-			}
-		}
+		// Do not enforce health check failures on the client; server is source of truth
 	};
 };
 
@@ -620,8 +616,6 @@ const handleWebSocketMessage = (message) => {
 					payloadKeys: message && typeof message === 'object' ? Object.keys(message) : []
 				});
 			} catch {}
-			// Reset health check failures on successful response
-			healthCheckFailures = 0;
 			break;
 		default:
 			try { console.log('[RetroTemplate][WS] message (unhandled type):', message && message.type); } catch {}
