@@ -50,6 +50,84 @@ let gameToken;
 let timerStarted = false;
 let gameLoaded = false;
 
+// =============================
+// MINIMAL DEATH FRAMEWORK (OPT-IN via ?deaths=1)
+// =============================
+const urlParams_death = new URLSearchParams(window.location.search);
+const DEATHS_ENABLED = (() => {
+	const v = (urlParams_death.get('deaths') || '').toLowerCase();
+	return v === '1' || v === 'true' || v === 'yes';
+})();
+// Basic config & stats
+const DEATH_CONFIG = {
+	enabled: DEATHS_ENABLED,
+	debug: urlParams_death.get('debugDeaths') === '1',
+	limit: parseInt(urlParams_death.get('deathLimit') || '3') || 3,
+	graceMs: 1500, // ignore early startup transitions
+	autoSaveOnDeath: false // set true later if desired
+};
+window.DEATH_CONFIG = DEATH_CONFIG;
+window.deathStats = { count: 0, limit: DEATH_CONFIG.limit, lastAt: null };
+
+// Public registration (game page supplies detector logic)
+const deathSources = [];
+window.registerDeathSource = function registerDeathSource(fn){
+	if (typeof fn === 'function') {
+		deathSources.push(fn);
+		return () => { const i = deathSources.indexOf(fn); if (i >= 0) deathSources.splice(i,1); };
+	}
+	return () => {};
+};
+
+// Death emission helper
+let _deathStartTs = null;
+function emitDeath(){
+	if (!DEATH_CONFIG.enabled) return;
+	const now = Date.now();
+	if (_deathStartTs && (now - _deathStartTs) < DEATH_CONFIG.graceMs) return; // grace window
+	window.deathStats.count += 1;
+	window.deathStats.lastAt = now;
+	console.log('[Death] count=', window.deathStats.count);
+	// Fire event for any listeners (UI, analytics, etc.)
+	try { window.dispatchEvent(new CustomEvent('death', { detail: { count: window.deathStats.count } })); } catch {}
+	// Optional autosave on death
+	if (DEATH_CONFIG.autoSaveOnDeath) {
+		try { saveStateToBackend(); } catch {}
+	}
+	// Trigger end-of-session when limit reached
+	if (window.deathStats.count >= DEATH_CONFIG.limit) {
+		// Universal end trigger mirrors timer expiry logic
+		pauseGame();
+		if (window.parent !== window) {
+			window.parent.postMessage({ type: 'session_options' }, '*');
+		}
+	}
+}
+window._emitDeath = emitDeath; // exposed for game page manual triggers if needed
+
+// Optional minimal debug overlay
+let _deathOverlayEl = null;
+function _ensureDeathOverlay(){
+	if (!DEATH_CONFIG.debug || _deathOverlayEl) return;
+	const el = document.createElement('div');
+	el.id = 'death-debug-overlay';
+	Object.assign(el.style, {
+		position: 'fixed', top: '10px', left: '10px', background: 'rgba(0,0,0,0.75)',
+		color: '#fff', padding: '6px 10px', font: '12px/1.3 monospace', zIndex: 9999,
+		borderRadius: '4px'
+	});
+	el.innerHTML = '<div>Deaths: <span id="dbgDeaths">0</span> / '+DEATH_CONFIG.limit+'</div>';
+	document.body.appendChild(el);
+	_deathOverlayEl = el;
+}
+function _updateDeathOverlay(){
+	if (!_deathOverlayEl) return;
+	const span = _deathOverlayEl.querySelector('#dbgDeaths');
+	if (span) span.textContent = String(window.deathStats.count);
+}
+window.addEventListener('death', _updateDeathOverlay);
+
+
 // WebSocket and health check variables
 let websocket;
 let healthCheckInterval;
@@ -301,6 +379,19 @@ const initGame = async () => {
 
 	startGameTimer();
 	startAutoSave();
+
+	// Start minimal death polling loop after emulator ready
+	if (DEATH_CONFIG.enabled) {
+		_deathStartTs = Date.now();
+		_ensureDeathOverlay();
+		setInterval(() => {
+			const emu = getEmulator();
+			if (!emu) return;
+			for (const src of deathSources) {
+				try { src(emu, emitDeath); } catch {}
+			}
+		}, 200);
+	}
 };
 
 EJS_onGameStart = initGame;
