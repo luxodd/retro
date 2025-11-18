@@ -19,7 +19,8 @@ EJS_color = "#0064ff"; // Theme color
 EJS_startOnLoaded = true;
 EJS_pathtodata = "https://cdn.emulatorjs.org/stable/data/";
 EJS_gameUrl = "{{GAME_FILE}}"; // ROM/ISO filename
-{{LOAD_STATE_URL;}}EJS_language = "en-US"; // Force English US locale
+{{LOAD_STATE_URL;}}
+EJS_language = "en-US"; // Force English US locale
 
 // Performance Optimizations
 EJS_threads = typeof SharedArrayBuffer !== "undefined"; // Enable threading if supported
@@ -154,30 +155,14 @@ const saveStateToBackend = async () => {
 	const gameId = getGameId();
 	const emulator = getEmulator();
 
-	if (!token) {
-		log("No auth token, cannot save");
-		return;
-	}
-
-	if (!gameId) {
-		log("No game ID, cannot save");
-		return;
-	}
-
-	if (!emulator || !emulator.gameManager) {
-		log("Emulator not ready, cannot save");
+	if (!token || !gameId || !emulator || !emulator.gameManager) {
 		return;
 	}
 
 	saveInProgress = true;
 	log(`Saving state for game: ${gameId}`);
-	log(
-		`Using auth token (length: ${token?.length || 0}):`,
-		token ? token.substring(0, 20) + "..." : "MISSING"
-	);
 
 	try {
-		// THE FIX: Use getState() instead of saveState() - returns Uint8Array
 		const stateData = emulator.gameManager.getState();
 
 		if (!stateData || stateData.length === 0) {
@@ -185,14 +170,7 @@ const saveStateToBackend = async () => {
 			return;
 		}
 
-		// Convert Uint8Array to base64
 		const base64Data = uint8ArrayToBase64(stateData);
-
-		log(
-			`Sending save request to: ${
-				AUTO_SAVE_CONFIG.serverUrl
-			}/api/v1/game-state/save?gameID=${encodeURIComponent(gameId)}`
-		);
 
 		const response = await fetch(
 			`${
@@ -211,11 +189,8 @@ const saveStateToBackend = async () => {
 			}
 		);
 
-		log(`Save response status: ${response.status}`);
-
 		if (!response.ok) {
 			const errorText = await response.text();
-			log(`Save error response body:`, errorText);
 			throw new Error(`Save failed: ${response.status} - ${errorText}`);
 		}
 
@@ -237,15 +212,10 @@ const loadStateFromBackend = async () => {
 	const gameId = getGameId();
 
 	if (!gameId) {
-		log("No game ID, cannot load");
 		return null;
 	}
 
 	log(`Loading state for game: ${gameId}`);
-	log(
-		`Using auth token for load (length: ${token?.length || 0}):`,
-		token ? token.substring(0, 20) + "..." : "MISSING"
-	);
 
 	try {
 		const url = new URL(`${AUTO_SAVE_CONFIG.serverUrl}/api/v1/game-state/load`);
@@ -256,17 +226,13 @@ const loadStateFromBackend = async () => {
 			headers["Authorization"] = `Bearer ${token}`;
 		}
 
-		log(`Loading from URL: ${url.toString()}`);
-
 		const response = await fetch(url.toString(), {
 			method: "GET",
 			headers: headers,
 		});
 
-		log(`Load response status: ${response.status}`);
-
 		if (response.status === 404) {
-			log("No saved state found (starting fresh)");
+			log("No saved state found");
 			return null;
 		}
 
@@ -274,11 +240,10 @@ const loadStateFromBackend = async () => {
 			throw new Error(`Load failed: ${response.status}`);
 		}
 
-		// Backend returns raw binary data, not JSON
 		const arrayBuffer = await response.arrayBuffer();
 		const stateData = new Uint8Array(arrayBuffer);
 
-		log("State loaded successfully, size:", stateData.length);
+		log("State loaded, size:", stateData.length);
 		return stateData;
 	} catch (error) {
 		console.error("[AutoSave] Load error:", error);
@@ -344,8 +309,6 @@ EJS_onLoadState = initGame;
 
 // Hook into manual saves - when user presses save button in emulator
 EJS_onSaveUpdate = function (event) {
-	log("Manual save detected!");
-	// Sync manual saves to backend immediately
 	if (AUTO_SAVE_CONFIG.enabled) {
 		saveStateToBackend();
 	}
@@ -401,6 +364,8 @@ const startGameTimer = () => {
 
 		if (gameTimer <= 0) {
 			clearInterval(timerInterval);
+			timerInterval = null;
+			timerStarted = false;
 			handleTimerExpired();
 		}
 	}, 1000);
@@ -412,11 +377,19 @@ const resetTimer = () => {
 	// Clear any existing timer interval to prevent multiple intervals
 	if (timerInterval) {
 		clearInterval(timerInterval);
+		timerInterval = null;
 	}
 
+	// Reset all timer state
 	gameTimer = GAME_TIMER_SECONDS;
 	timerStarted = false;
-	timerOverlay.classList.remove("warning");
+
+	// Remove warning styling
+	if (timerOverlay) {
+		timerOverlay.classList.remove("warning");
+	}
+
+	// Update display and restart timer
 	updateTimerDisplay();
 	startGameTimer();
 };
@@ -439,16 +412,38 @@ const pauseGame = () => {
 
 const resumeGame = () => {
 	const emulator = getEmulator();
-	if (emulator?.play) {
+
+	if (!emulator) {
+		storeEmulator();
+		const retryEmulator = getEmulator();
+		if (!retryEmulator) {
+			console.error("Failed to get emulator for resume");
+			return false;
+		}
+		return resumeGame();
+	}
+
+	if (typeof emulator.play === "function") {
 		emulator.play();
 		return true;
 	}
-	storeEmulator();
-	const retryEmulator = getEmulator();
-	if (retryEmulator?.play) {
-		retryEmulator.play();
+
+	if (typeof emulator.start === "function") {
+		emulator.start();
 		return true;
 	}
+
+	if ("paused" in emulator) {
+		emulator.paused = false;
+		return true;
+	}
+
+	if (typeof emulator.resume === "function") {
+		emulator.resume();
+		return true;
+	}
+
+	console.error("No resume method found on emulator");
 	return false;
 };
 
@@ -608,7 +603,9 @@ const handleMessage = (event) => {
 	// Handle JWT token
 	if (event.data.jwt) {
 		gameToken = event.data.jwt;
-		return;
+		if (!websocket || websocket.readyState !== WebSocket.OPEN) {
+			initializeWebSocket();
+		}
 	}
 
 	// Handle action messages
@@ -624,7 +621,10 @@ const handleMessage = (event) => {
 		restart: restartGame,
 	};
 
-	actions[action]?.();
+	const handler = actions[action];
+	if (handler) {
+		handler();
+	}
 };
 
 // Initialize
@@ -632,7 +632,15 @@ window.addEventListener("message", handleMessage);
 window.addEventListener("beforeunload", () => {
 	stopAutoSave();
 });
-window.onload = () => {
+
+// Initialize
+const initialize = () => {
 	updateTimerDisplay();
 	getGameToken();
 };
+
+if (document.readyState === "loading") {
+	document.addEventListener("DOMContentLoaded", initialize);
+} else {
+	initialize();
+}
