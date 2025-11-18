@@ -47,7 +47,106 @@ let lastSaveTimestamp = null;
 // ============================================
 // END CONFIGURATION
 // ============================================
+(function initLoadProgressReporter() {
+	// Only initialize if running in Electron with electronAPI
+	if (!window.electronAPI || !window.electronAPI.send) {
+		console.log('[PROGRESS] Not in Electron, skipping progress reporter');
+		return;
+	}
 
+	const gameId = '{{GAME_NAME}}'; // Uses template variable
+	const startTime = Date.now();
+	let lastReportedPercent = 0;
+
+	// Helper to report progress
+	function reportProgress(percent, message) {
+		// Only report if progress increased by at least 5% to avoid spam
+		if (percent - lastReportedPercent >= 5 || percent >= 100) {
+			try {
+				window.electronAPI.send('game-load-progress', {
+					gameId: gameId,
+					percent: percent,
+					message: message,
+					timestamp: Date.now()
+				});
+				lastReportedPercent = percent;
+				console.log(`[PROGRESS] ${percent.toFixed(0)}% - ${message}`);
+			} catch (e) {
+				console.warn('[PROGRESS] Failed to send progress:', e);
+			}
+		}
+	}
+
+	// Report initial load
+	reportProgress(0, 'Initializing EmulatorJS');
+
+	// Report on DOM ready
+	if (document.readyState === 'loading') {
+		document.addEventListener('DOMContentLoaded', function () {
+			reportProgress(20, 'DOM loaded');
+	});
+} else {
+	reportProgress(20, 'DOM already loaded');
+}
+
+// Report on window load
+window.addEventListener('load', function () {
+	reportProgress(50, 'Window loaded');
+});
+
+// Hook into EmulatorJS lifecycle
+const originalOnGameStart = window.EJS_onGameStart;
+window.EJS_onGameStart = function() {
+	reportProgress(90, 'EmulatorJS game starting');
+	if (originalOnGameStart) {
+		originalOnGameStart();
+	}
+
+	// Report full completion shortly after game starts
+	setTimeout(function() {
+		reportProgress(100, 'Game fully loaded');
+	}, 2000);
+};
+
+// Heartbeat - periodically report progress to prevent timeout
+// This is crucial for slow machines or large ROMs
+let heartbeatPercent = 50;
+const heartbeatInterval = setInterval(function() {
+	const elapsed = Date.now() - startTime;
+
+	// Stop heartbeat after 2 minutes or when game loaded
+	if (elapsed > 120000 || gameLoaded) {
+		clearInterval(heartbeatInterval);
+		return;
+	}
+
+	// If we haven't reported completion yet, send heartbeat
+	if (lastReportedPercent < 90) {
+		const elapsedSeconds = Math.floor(elapsed / 1000);
+		reportProgress(
+			Math.min(heartbeatPercent, 85),
+			`Loading ROM... (${elapsedSeconds}s elapsed)`
+		);
+		heartbeatPercent = Math.min(heartbeatPercent + 2, 85);
+	}
+}, 5000); // Every 5 seconds
+
+// Fallback: Use the existing checkGameReady function as a progress indicator
+const checkInterval = setInterval(function() {
+	if (gameLoaded) {
+		clearInterval(checkInterval);
+		reportProgress(100, 'Game confirmed ready');
+	} else if (checkGameReady && checkGameReady()) {
+		clearInterval(checkInterval);
+		reportProgress(95, 'Game canvas detected');
+	}
+}, 1000);
+
+console.log('[PROGRESS] Load progress reporter initialized for game:', gameId);
+})();
+// ============================================
+// END LOAD PROGRESS REPORTER
+// ============================================
 // Timer variables
 let gameTimer = GAME_TIMER_SECONDS;
 let timerInterval;
