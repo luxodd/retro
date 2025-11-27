@@ -1,0 +1,762 @@
+// ============================================
+// GAME CONFIGURATION - EDIT THIS SECTION ONLY
+// ============================================
+const GAME_TIMER_SECONDS = (() => {
+	const urlParams = new URLSearchParams(window.location.search);
+	const timeout = urlParams.get("timeout");
+	return timeout && !isNaN(timeout) && parseInt(timeout) > 0
+		? parseInt(timeout)
+		: null;
+})();
+const WARNING_THRESHOLD = 30; // Show warning when timer reaches this value
+
+// Minimal death flag (opt-in by ?deaths=1|true|yes). Game pages (e.g. MegaMan X3) read this
+// and run their own memory-based detection, then call inGameTrx() when limit reached.
+const DEATHS_ENABLED = (() => {
+	try {
+		const p = new URLSearchParams(window.location.search);
+		const v = (p.get('deaths') || '').toLowerCase();
+		return v === '1' || v === 'true' || v === 'yes';
+	} catch { return false; }
+})();
+window.DEATHS_ENABLED = DEATHS_ENABLED;
+
+// EmulatorJS Configuration
+EJS_player = "#game";
+EJS_core = "{{CORE}}"; // Game console: gba, nes, snes, psx, n64, nds, etc.
+EJS_gameName = "{{GAME_NAME}}"; // Game identifier (display name)
+EJS_gameID = "{{GAME_ID}}"; // Actual database UUID for API calls
+EJS_color = "#0064ff"; // Theme color
+EJS_startOnLoaded = true;
+EJS_pathtodata = "https://cdn.emulatorjs.org/stable/data/";
+EJS_gameUrl = "{{GAME_FILE}}"; // ROM/ISO filename
+{{LOAD_STATE_URL}}EJS_language = "en-US";
+
+// Performance Optimizations
+EJS_threads = typeof SharedArrayBuffer !== "undefined"; // Enable threading if supported
+
+// ============================================
+// AUTO-SAVE CONFIGURATION
+// ============================================
+const AUTO_SAVE_CONFIG = {
+	enabled: true,
+	saveIntervalSeconds: 30,
+	serverUrl: window.location.origin,
+	enableDebugLogs: true,
+	showNotifications: false,
+};
+
+let autoSaveTimer = null;
+let saveInProgress = false;
+let lastSaveTimestamp = null;
+
+// ============================================
+// END CONFIGURATION
+// ============================================
+(function initLoadProgressReporter() {
+	// Only initialize if running in Electron with electronAPI
+	if (!window.electronAPI || !window.electronAPI.send) {
+		console.log('[PROGRESS] Not in Electron, skipping progress reporter');
+		return;
+	}
+
+	const gameId = '{{GAME_NAME}}'; // Uses template variable
+	const startTime = Date.now();
+	let lastReportedPercent = 0;
+
+	// Helper to report progress
+	function reportProgress(percent, message) {
+		// Only report if progress increased by at least 5% to avoid spam
+		if (percent - lastReportedPercent >= 5 || percent >= 100) {
+			try {
+				window.electronAPI.send('game-load-progress', {
+					gameId: gameId,
+					percent: percent,
+					message: message,
+					timestamp: Date.now()
+				});
+				lastReportedPercent = percent;
+				console.log(`[PROGRESS] ${percent.toFixed(0)}% - ${message}`);
+			} catch (e) {
+				console.warn('[PROGRESS] Failed to send progress:', e);
+			}
+		}
+	}
+
+	// Report initial load
+	reportProgress(0, 'Initializing EmulatorJS');
+
+	// Report on DOM ready
+	if (document.readyState === 'loading') {
+		document.addEventListener('DOMContentLoaded', function () {
+			reportProgress(20, 'DOM loaded');
+	});
+} else {
+	reportProgress(20, 'DOM already loaded');
+}
+
+// Report on window load
+window.addEventListener('load', function () {
+	reportProgress(50, 'Window loaded');
+});
+
+// Hook into EmulatorJS lifecycle
+const originalOnGameStart = window.EJS_onGameStart;
+window.EJS_onGameStart = function() {
+	reportProgress(90, 'EmulatorJS game starting');
+	if (originalOnGameStart) {
+		originalOnGameStart();
+	}
+
+	// Report full completion shortly after game starts
+	setTimeout(function() {
+		reportProgress(100, 'Game fully loaded');
+	}, 2000);
+};
+
+// Heartbeat - periodically report progress to prevent timeout
+// This is crucial for slow machines or large ROMs
+let heartbeatPercent = 50;
+const heartbeatInterval = setInterval(function() {
+	const elapsed = Date.now() - startTime;
+
+	// Stop heartbeat after 2 minutes or when game loaded
+	if (elapsed > 120000 || gameLoaded) {
+		clearInterval(heartbeatInterval);
+		return;
+	}
+
+	// If we haven't reported completion yet, send heartbeat
+	if (lastReportedPercent < 90) {
+		const elapsedSeconds = Math.floor(elapsed / 1000);
+		reportProgress(
+			Math.min(heartbeatPercent, 85),
+			`Loading ROM... (${elapsedSeconds}s elapsed)`
+		);
+		heartbeatPercent = Math.min(heartbeatPercent + 2, 85);
+	}
+}, 5000); // Every 5 seconds
+
+// Fallback: Use the existing checkGameReady function as a progress indicator
+const checkInterval = setInterval(function() {
+	if (gameLoaded) {
+		clearInterval(checkInterval);
+		reportProgress(100, 'Game confirmed ready');
+	} else if (checkGameReady && checkGameReady()) {
+		clearInterval(checkInterval);
+		reportProgress(95, 'Game canvas detected');
+	}
+}, 1000);
+
+console.log('[PROGRESS] Load progress reporter initialized for game:', gameId);
+})();
+// ============================================
+// END LOAD PROGRESS REPORTER
+// ============================================
+// Timer variables
+let gameTimer = GAME_TIMER_SECONDS;
+let timerInterval;
+let gameToken;
+let timerStarted = false;
+let gameLoaded = false;
+
+
+
+// WebSocket and health check variables
+let websocket;
+let healthCheckInterval;
+let healthCheckFailures = 0;
+const maxHealthCheckFailures = 3;
+let isGameActive = true;
+
+// Cache DOM elements
+const timerOverlay = document.getElementById("timer-overlay");
+const gameContainer = document.querySelector("#game");
+
+// Helper: Get emulator instance
+const getEmulator = () => window.EJS_emulator || gameContainer?.ej;
+
+// Helper: Store emulator instance
+const storeEmulator = () => {
+	if (typeof EmulatorJS !== "undefined" && gameContainer?.ej) {
+		window.EJS_emulator = gameContainer.ej;
+	}
+};
+
+// ============================================
+// AUTO-SAVE HELPER FUNCTIONS
+// ============================================
+const log = (...args) => {
+	if (AUTO_SAVE_CONFIG.enableDebugLogs) {
+		console.log("[AutoSave]", ...args);
+	}
+};
+
+const getGameId = () => {
+	// 1. Use the actual database UUID if provided via template
+	if (typeof EJS_gameID !== "undefined" && EJS_gameID) {
+		return EJS_gameID;
+	}
+
+	// 2. Try to extract UUID from current URL path (e.g., /proxy/{uuid}/index.html)
+	try {
+		const urlPath = window.location.pathname;
+		// Match UUID pattern in URL: /proxy/{uuid}/ or /{uuid}/
+		const uuidRegex =
+			/\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\//i;
+		const match = urlPath.match(uuidRegex);
+		if (match && match[1]) {
+			log(`Extracted gameID from URL: ${match[1]}`);
+			return match[1];
+		}
+	} catch (error) {
+		log("Error extracting gameID from URL:", error);
+	}
+
+	// 3. Fallback to sanitized name for backwards compatibility
+	if (!EJS_gameName) return null;
+	const sanitized = EJS_gameName.toLowerCase().replace(/[^a-z0-9]/g, "-");
+	log(`Using fallback gameID (sanitized name): ${sanitized}`);
+	return sanitized;
+};
+
+const getAuthToken = () => gameToken;
+
+// Helper: Convert Uint8Array to base64 (handles large arrays)
+const uint8ArrayToBase64 = (uint8Array) => {
+	// For large arrays, process in chunks to avoid stack overflow
+	const chunkSize = 32768; // 32KB chunks
+	let binary = "";
+
+	for (let i = 0; i < uint8Array.length; i += chunkSize) {
+		const chunk = uint8Array.subarray(
+			i,
+			Math.min(i + chunkSize, uint8Array.length)
+		);
+		binary += String.fromCharCode.apply(null, chunk);
+	}
+
+	return "data:application/octet-stream;base64," + btoa(binary);
+};
+
+// Helper: Convert base64 to Uint8Array
+const base64ToUint8Array = (base64) => {
+	// Remove data URL prefix if present
+	const base64Data = base64.replace(
+		/^data:application\/octet-stream;base64,/,
+		""
+	);
+	const binaryString = atob(base64Data);
+	const bytes = new Uint8Array(binaryString.length);
+	for (let i = 0; i < binaryString.length; i++) {
+		bytes[i] = binaryString.charCodeAt(i);
+	}
+	return bytes;
+};
+
+// Save current game state to backend (FIXED VERSION)
+const saveStateToBackend = async () => {
+	if (!AUTO_SAVE_CONFIG.enabled) return;
+	if (saveInProgress) {
+		log("Save already in progress, skipping");
+		return;
+	}
+
+	const token = getAuthToken();
+	const gameId = getGameId();
+	const emulator = getEmulator();
+
+	if (!token || !gameId || !emulator || !emulator.gameManager) {
+		return;
+	}
+
+	saveInProgress = true;
+	log(`Saving state for game: ${gameId}`);
+
+	try {
+		const stateData = emulator.gameManager.getState();
+
+		if (!stateData || stateData.length === 0) {
+			log("Empty state data, skipping save");
+			return;
+		}
+
+		const base64Data = uint8ArrayToBase64(stateData);
+
+		const response = await fetch(
+			`${
+				AUTO_SAVE_CONFIG.serverUrl
+			}/api/v1/game-state/save?gameID=${encodeURIComponent(gameId)}`,
+			{
+				method: "POST",
+				headers: {
+					"Content-Type": "application/json",
+					Authorization: `Bearer ${token}`,
+				},
+				body: JSON.stringify({
+					stateData: base64Data,
+					compression: "none",
+				}),
+			}
+		);
+
+		if (!response.ok) {
+			const errorText = await response.text();
+			throw new Error(`Save failed: ${response.status} - ${errorText}`);
+		}
+
+		const result = await response.json();
+		lastSaveTimestamp = Date.now();
+		log("State saved successfully:", result);
+	} catch (error) {
+		console.error("[AutoSave] Error:", error);
+	} finally {
+		saveInProgress = false;
+	}
+};
+
+// Load saved game state from backend (IMPROVED)
+const loadStateFromBackend = async () => {
+	if (!AUTO_SAVE_CONFIG.enabled) return null;
+
+	const token = getAuthToken();
+	const gameId = getGameId();
+
+	if (!gameId) {
+		return null;
+	}
+
+	log(`Loading state for game: ${gameId}`);
+
+	try {
+		const url = new URL(`${AUTO_SAVE_CONFIG.serverUrl}/api/v1/game-state/load`);
+		url.searchParams.set("gameID", gameId);
+
+		const headers = {};
+		if (token) {
+			headers["Authorization"] = `Bearer ${token}`;
+		}
+
+		const response = await fetch(url.toString(), {
+			method: "GET",
+			headers: headers,
+		});
+
+		if (response.status === 404) {
+			log("No saved state found");
+			return null;
+		}
+
+		if (!response.ok) {
+			throw new Error(`Load failed: ${response.status}`);
+		}
+
+		const arrayBuffer = await response.arrayBuffer();
+		const stateData = new Uint8Array(arrayBuffer);
+
+		log("State loaded, size:", stateData.length);
+		return stateData;
+	} catch (error) {
+		console.error("[AutoSave] Load error:", error);
+		return null;
+	}
+};
+
+// Start periodic auto-save
+const startAutoSave = () => {
+	if (!AUTO_SAVE_CONFIG.enabled) return;
+
+	if (autoSaveTimer) {
+		clearInterval(autoSaveTimer);
+	}
+
+	log(`Starting auto-save (every ${AUTO_SAVE_CONFIG.saveIntervalSeconds}s)`);
+
+	autoSaveTimer = setInterval(() => {
+		saveStateToBackend();
+	}, AUTO_SAVE_CONFIG.saveIntervalSeconds * 1000);
+};
+
+const stopAutoSave = () => {
+	if (autoSaveTimer) {
+		clearInterval(autoSaveTimer);
+		autoSaveTimer = null;
+		log("Auto-save stopped");
+	}
+};
+
+// ============================================
+// GAME INITIALIZATION (MODIFIED)
+// ============================================
+
+// EmulatorJS callbacks
+const initGame = async () => {
+	gameLoaded = true;
+	storeEmulator();
+
+	// Try to load saved state before starting timer
+	const savedState = await loadStateFromBackend();
+	if (savedState) {
+		try {
+			const emulator = getEmulator();
+			if (emulator && emulator.gameManager) {
+				log("Restoring saved state...");
+				// Use loadState() with Uint8Array
+				emulator.gameManager.loadState(savedState);
+				log("State restored!");
+			}
+		} catch (error) {
+			console.error("[AutoSave] Failed to restore state:", error);
+			log("Starting fresh game instead");
+		}
+	}
+
+	startGameTimer();
+	startAutoSave();
+};
+
+EJS_onGameStart = initGame;
+EJS_onLoadState = initGame;
+
+// Hook into manual saves - when user presses save button in emulator
+EJS_onSaveUpdate = function (event) {
+	if (AUTO_SAVE_CONFIG.enabled) {
+		saveStateToBackend();
+	}
+};
+
+// Fallback function to detect when game is ready
+const checkGameReady = () => {
+	// Look for canvas element and check if it has content
+	const canvas = document.querySelector("#game canvas");
+	if (canvas && canvas.width > 0 && canvas.height > 0) {
+		if (!gameLoaded) {
+			gameLoaded = true;
+			storeEmulator();
+			startGameTimer();
+		}
+		return true;
+	}
+	return false;
+};
+
+// Timer functions
+const updateTimerDisplay = () => {
+	if (!GAME_TIMER_SECONDS) {
+		timerOverlay.style.display = "none";
+		return;
+	}
+	timerOverlay.style.display = "block";
+	const minutes = Math.floor(gameTimer / 60);
+	const seconds = gameTimer % 60;
+	timerOverlay.textContent = `Time Remaining: ${minutes}:${seconds
+		.toString()
+		.padStart(2, "0")}`;
+};
+
+// Universal end trigger (timer expiry & game-specific death logic)
+const inGameTrx = () => {
+	pauseGame();
+	if (window.parent !== window) {
+		window.parent.postMessage({ type: 'session_options' }, '*');
+	}
+};
+window.inGameTrx = inGameTrx;
+
+// Backwards compatibility: timer path previously used handleTimerExpired
+const handleTimerExpired = inGameTrx;
+
+const startGameTimer = () => {
+	if (!GAME_TIMER_SECONDS || timerStarted) return;
+
+	timerStarted = true;
+	timerInterval = setInterval(() => {
+		gameTimer--;
+		updateTimerDisplay();
+
+		if (gameTimer <= WARNING_THRESHOLD) {
+			timerOverlay.classList.add("warning");
+		}
+
+		if (gameTimer <= 0) {
+			clearInterval(timerInterval);
+			timerInterval = null;
+			timerStarted = false;
+			inGameTrx();
+		}
+	}, 1000);
+};
+
+const resetTimer = () => {
+	if (!GAME_TIMER_SECONDS) return;
+
+	// Clear any existing timer interval to prevent multiple intervals
+	if (timerInterval) {
+		clearInterval(timerInterval);
+		timerInterval = null;
+	}
+
+	// Reset all timer state
+	gameTimer = GAME_TIMER_SECONDS;
+	timerStarted = false;
+
+	// Remove warning styling
+	if (timerOverlay) {
+		timerOverlay.classList.remove("warning");
+	}
+
+	// Update display and restart timer
+	updateTimerDisplay();
+	startGameTimer();
+};
+
+// Game control functions
+const pauseGame = () => {
+	const emulator = getEmulator();
+	if (emulator?.pause) {
+		emulator.pause();
+		return true;
+	}
+	storeEmulator();
+	const retryEmulator = getEmulator();
+	if (retryEmulator?.pause) {
+		retryEmulator.pause();
+		return true;
+	}
+	return false;
+};
+
+const resumeGame = () => {
+	const emulator = getEmulator();
+
+	if (!emulator) {
+		storeEmulator();
+		const retryEmulator = getEmulator();
+		if (!retryEmulator) {
+			console.error("Failed to get emulator for resume");
+			return false;
+		}
+		return resumeGame();
+	}
+
+	if (typeof emulator.play === "function") {
+		emulator.play();
+		return true;
+	}
+
+	if (typeof emulator.start === "function") {
+		emulator.start();
+		return true;
+	}
+
+	if ("paused" in emulator) {
+		emulator.paused = false;
+		return true;
+	}
+
+	if (typeof emulator.resume === "function") {
+		emulator.resume();
+		return true;
+	}
+
+	console.error("No resume method found on emulator");
+	return false;
+};
+
+const restartGame = () => window.location.reload();
+
+// Token management
+const getGameToken = () => {
+	const urlParams = new URLSearchParams(window.location.search);
+	let token = urlParams.get("token");
+
+	if (!token) {
+		// Try to get token from parent window message
+		window.addEventListener("message", function (event) {
+			if (event.data && event.data.jwt) {
+				token = event.data.jwt;
+				gameToken = token;
+				initializeWebSocket();
+			}
+		});
+	} else {
+		gameToken = token;
+		initializeWebSocket();
+	}
+
+	return token;
+};
+
+// WebSocket initialization
+const initializeWebSocket = () => {
+	if (!gameToken) {
+		console.error("No game token available");
+		return;
+	}
+
+	// Get the parent window's origin for WebSocket connection
+	let serverHost;
+	try {
+		serverHost = window.parent.location.host;
+	} catch (e) {
+		// Fallback: extract from referrer or use default
+		if (document.referrer) {
+			const referrerUrl = new URL(document.referrer);
+			serverHost = referrerUrl.host;
+		} else {
+			serverHost = window.location.hostname + ":8080";
+		}
+	}
+
+	const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+	const wsUrl = `${protocol}//${serverHost}/ws?token=${gameToken}`;
+
+	websocket = new WebSocket(wsUrl);
+
+	websocket.onopen = function (event) {
+		startHealthCheck();
+	};
+
+	websocket.onmessage = function (event) {
+		const message = JSON.parse(event.data);
+		handleWebSocketMessage(message);
+	};
+
+	websocket.onclose = function (event) {
+		// Only count failures after game has loaded
+		if (gameLoaded) {
+			healthCheckFailures++;
+
+			if (healthCheckFailures >= maxHealthCheckFailures) {
+				endSession("Connection lost");
+				return;
+			}
+		}
+
+		if (isGameActive) {
+			// Try to reconnect after 5 seconds
+			setTimeout(initializeWebSocket, 5000);
+		}
+	};
+
+	websocket.onerror = function (error) {
+		// Only count failures after game has loaded
+		if (gameLoaded) {
+			healthCheckFailures++;
+
+			if (healthCheckFailures >= maxHealthCheckFailures) {
+				endSession("Connection error");
+			}
+		}
+	};
+};
+
+// Handle WebSocket messages
+const handleWebSocketMessage = (message) => {
+	switch (message.type) {
+		case "health_status_check_response":
+			// Reset health check failures on successful response
+			healthCheckFailures = 0;
+			break;
+	}
+};
+
+// Send WebSocket message
+const sendWebSocketMessage = (type, payload = null) => {
+	if (websocket && websocket.readyState === WebSocket.OPEN) {
+		const message = {
+			msgver: "1",
+			type: type,
+			ts: new Date().toISOString(),
+			status: 200,
+		};
+
+		// Only include payload if it's not null
+		if (payload !== null) {
+			message.payload = payload;
+		}
+
+		websocket.send(JSON.stringify(message));
+	}
+};
+
+// Start health check
+const startHealthCheck = () => {
+	healthCheckInterval = setInterval(function () {
+		if (isGameActive) {
+			sendWebSocketMessage("health_status_check", {});
+		}
+	}, 30000); // Send health check every 30 seconds
+};
+
+// End session with reason (MODIFIED - added auto-save)
+const endSession = async (reason) => {
+	isGameActive = false;
+
+	// Save one final time before ending
+	await saveStateToBackend();
+
+	clearInterval(timerInterval);
+	clearInterval(healthCheckInterval);
+	stopAutoSave();
+
+	if (websocket) {
+		websocket.close();
+	}
+
+	// Send message to parent window to redirect
+	if (window.parent !== window) {
+		window.parent.postMessage({ type: "session_end", reason: reason }, "*");
+	} else {
+		window.location.href = "/selectGame";
+	}
+};
+
+// Message handlers
+const handleMessage = (event) => {
+	if (!event.data) return;
+
+	// Handle JWT token
+	if (event.data.jwt) {
+		gameToken = event.data.jwt;
+		if (!websocket || websocket.readyState !== WebSocket.OPEN) {
+			initializeWebSocket();
+		}
+	}
+
+	// Handle action messages
+	const { action } = event.data;
+	if (!action) return;
+
+	const actions = {
+		end: () => endSession("User ended session"),
+		continue: () => {
+			resetTimer();
+			resumeGame();
+		},
+		restart: restartGame,
+	};
+
+	const handler = actions[action];
+	if (handler) {
+		handler();
+	}
+};
+
+// Initialize
+window.addEventListener("message", handleMessage);
+window.addEventListener("beforeunload", () => {
+	stopAutoSave();
+});
+
+// Initialize
+const initialize = () => {
+	updateTimerDisplay();
+	getGameToken();
+};
+
+if (document.readyState === "loading") {
+	document.addEventListener("DOMContentLoaded", initialize);
+} else {
+	initialize();
+}
