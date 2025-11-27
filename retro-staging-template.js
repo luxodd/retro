@@ -343,7 +343,22 @@ const loadStateFromBackend = async () => {
 		});
 
 		if (response.status === 404) {
-			log("No saved state found");
+			log("No saved state found on backend, trying local state file...");
+			try {
+				// Try to fetch local state file (e.g., ./MegaManX3.state)
+				const localStateUrl = `./${EJS_gameName}.state`;
+				const localResp = await fetch(localStateUrl);
+				if (localResp.ok) {
+					const arrayBuffer = await localResp.arrayBuffer();
+					const stateData = new Uint8Array(arrayBuffer);
+					log("Loaded local state file:", localStateUrl, "size:", stateData.length);
+					return stateData;
+				} else {
+					log("No local state file found:", localStateUrl);
+				}
+			} catch (e) {
+				log("Error loading local state file:", e);
+			}
 			return null;
 		}
 
