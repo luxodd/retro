@@ -512,6 +512,11 @@ const hideSavePrompt = () => {
 		clearTimeout(savePromptTimeout);
 		savePromptTimeout = null;
 	}
+
+	// Reset savePromptShown flag when save prompt is hidden (user made a choice)
+	if (typeof window.savePromptShown !== 'undefined') {
+		window.savePromptShown = false;
+	}
 };
 
 // Make showSavePrompt and saveStateToBackend available globally for Electron app integration
@@ -841,7 +846,11 @@ const endSession = async (reason) => {
 	// Send message to parent window to redirect
 	if (window.parent !== window) {
 		window.parent.postMessage({ type: "session_end", reason: reason }, "*");
+	} else if (window.electronAPI && window.electronAPI.returnToArcade) {
+		// Electron app - use returnToArcade
+		window.electronAPI.returnToArcade();
 	} else {
+		// Fallback for web browser
 		window.location.href = "/selectGame";
 	}
 };
@@ -886,8 +895,62 @@ const handleMessage = (event) => {
 
 // Initialize
 window.addEventListener("message", handleMessage);
-window.addEventListener("beforeunload", () => {
+
+// Intercept Escape key / physical back button (via navigate-back message or history.back())
+// Use window property so it's accessible from wrapped hideSavePrompt
+window.savePromptShown = false;
+
+// Intercept window.history.back() calls (triggered by Escape/physical back button)
+const originalHistoryBack = window.history.back;
+window.history.back = function () {
+	if (isGameActive && gameLoaded && !window.savePromptShown) {
+		console.log('[Template] Back navigation intercepted - showing save prompt');
+		// Show save prompt instead of navigating
+		if (typeof showSavePrompt === 'function') {
+			window.savePromptShown = true;
+			showSavePrompt();
+			// Don't call originalHistoryBack() - user will navigate after making choice
+			return;
+		}
+	}
+	// If save prompt not available or game not loaded, proceed with normal navigation
+	originalHistoryBack.call(window.history);
+};
+
+// Intercept page unload to show save prompt (fallback for browser scenarios)
+// Note: beforeunload is less reliable in Electron, but useful as a fallback
+window.addEventListener("beforeunload", (event) => {
+	// Only intercept if game is active and has been loaded, and save prompt hasn't been shown
+	if (isGameActive && gameLoaded && !window.savePromptShown) {
+		// In Electron, window.history.back() interception handles most cases
+		// This is mainly a fallback for browser-based scenarios
+		if (typeof showSavePrompt === 'function' && !window.electronAPI) {
+			// Only use beforeunload in non-Electron environments
+			event.preventDefault();
+			event.returnValue = ''; // Required for Chrome
+			window.savePromptShown = true;
+			showSavePrompt();
+			return '';
+		}
+	}
+	// Always stop auto-save on unload
 	stopAutoSave();
+});
+
+// Listen for navigate-back messages from parent window (Escape key / physical back button)
+// Note: This is a fallback - the preload script typically calls window.history.back() directly,
+// which is intercepted above. This listener handles cases where a message is sent instead.
+window.addEventListener("message", (event) => {
+	// Check if this is a navigate-back message (could come from parent window)
+	if (event.data && (event.data === 'navigate-back' || event.data.type === 'navigate-back')) {
+		if (isGameActive && gameLoaded && !window.savePromptShown) {
+			console.log('[Template] Navigate-back message received - showing save prompt');
+			if (typeof showSavePrompt === 'function') {
+				window.savePromptShown = true;
+				showSavePrompt();
+			}
+		}
+	}
 });
 
 // Initialize
