@@ -709,7 +709,7 @@ const endSession = async (reason) => {
 	isGameActive = false;
 
 	// Save one final time before ending
-	await saveStateToBackend();
+	//REMOVED: await saveStateToBackend();
 
 	clearInterval(timerInterval);
 	clearInterval(healthCheckInterval);
