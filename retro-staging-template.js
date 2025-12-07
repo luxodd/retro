@@ -30,7 +30,7 @@ EJS_color = "#0064ff"; // Theme color
 EJS_startOnLoaded = true;
 EJS_pathtodata = "https://cdn.emulatorjs.org/stable/data/";
 EJS_gameUrl = "{{GAME_FILE}}"; // ROM/ISO filename
-{{LOAD_STATE_URL}}EJS_language = "en-US";
+{ { LOAD_STATE_URL } } EJS_language = "en-US";
 
 // Performance Optimizations
 EJS_threads = typeof SharedArrayBuffer !== "undefined"; // Enable threading if supported
@@ -90,65 +90,65 @@ let lastSaveTimestamp = null;
 	if (document.readyState === 'loading') {
 		document.addEventListener('DOMContentLoaded', function () {
 			reportProgress(20, 'DOM loaded');
+		});
+	} else {
+		reportProgress(20, 'DOM already loaded');
+	}
+
+	// Report on window load
+	window.addEventListener('load', function () {
+		reportProgress(50, 'Window loaded');
 	});
-} else {
-	reportProgress(20, 'DOM already loaded');
-}
 
-// Report on window load
-window.addEventListener('load', function () {
-	reportProgress(50, 'Window loaded');
-});
+	// Hook into EmulatorJS lifecycle
+	const originalOnGameStart = window.EJS_onGameStart;
+	window.EJS_onGameStart = function () {
+		reportProgress(90, 'EmulatorJS game starting');
+		if (originalOnGameStart) {
+			originalOnGameStart();
+		}
 
-// Hook into EmulatorJS lifecycle
-const originalOnGameStart = window.EJS_onGameStart;
-window.EJS_onGameStart = function() {
-	reportProgress(90, 'EmulatorJS game starting');
-	if (originalOnGameStart) {
-		originalOnGameStart();
-	}
+		// Report full completion shortly after game starts
+		setTimeout(function () {
+			reportProgress(100, 'Game fully loaded');
+		}, 2000);
+	};
 
-	// Report full completion shortly after game starts
-	setTimeout(function() {
-		reportProgress(100, 'Game fully loaded');
-	}, 2000);
-};
+	// Heartbeat - periodically report progress to prevent timeout
+	// This is crucial for slow machines or large ROMs
+	let heartbeatPercent = 50;
+	const heartbeatInterval = setInterval(function () {
+		const elapsed = Date.now() - startTime;
 
-// Heartbeat - periodically report progress to prevent timeout
-// This is crucial for slow machines or large ROMs
-let heartbeatPercent = 50;
-const heartbeatInterval = setInterval(function() {
-	const elapsed = Date.now() - startTime;
+		// Stop heartbeat after 2 minutes or when game loaded
+		if (elapsed > 120000 || gameLoaded) {
+			clearInterval(heartbeatInterval);
+			return;
+		}
 
-	// Stop heartbeat after 2 minutes or when game loaded
-	if (elapsed > 120000 || gameLoaded) {
-		clearInterval(heartbeatInterval);
-		return;
-	}
+		// If we haven't reported completion yet, send heartbeat
+		if (lastReportedPercent < 90) {
+			const elapsedSeconds = Math.floor(elapsed / 1000);
+			reportProgress(
+				Math.min(heartbeatPercent, 85),
+				`Loading ROM... (${elapsedSeconds}s elapsed)`
+			);
+			heartbeatPercent = Math.min(heartbeatPercent + 2, 85);
+		}
+	}, 5000); // Every 5 seconds
 
-	// If we haven't reported completion yet, send heartbeat
-	if (lastReportedPercent < 90) {
-		const elapsedSeconds = Math.floor(elapsed / 1000);
-		reportProgress(
-			Math.min(heartbeatPercent, 85),
-			`Loading ROM... (${elapsedSeconds}s elapsed)`
-		);
-		heartbeatPercent = Math.min(heartbeatPercent + 2, 85);
-	}
-}, 5000); // Every 5 seconds
+	// Fallback: Use the existing checkGameReady function as a progress indicator
+	const checkInterval = setInterval(function () {
+		if (gameLoaded) {
+			clearInterval(checkInterval);
+			reportProgress(100, 'Game confirmed ready');
+		} else if (checkGameReady && checkGameReady()) {
+			clearInterval(checkInterval);
+			reportProgress(95, 'Game canvas detected');
+		}
+	}, 1000);
 
-// Fallback: Use the existing checkGameReady function as a progress indicator
-const checkInterval = setInterval(function() {
-	if (gameLoaded) {
-		clearInterval(checkInterval);
-		reportProgress(100, 'Game confirmed ready');
-	} else if (checkGameReady && checkGameReady()) {
-		clearInterval(checkInterval);
-		reportProgress(95, 'Game canvas detected');
-	}
-}, 1000);
-
-console.log('[PROGRESS] Load progress reporter initialized for game:', gameId);
+	console.log('[PROGRESS] Load progress reporter initialized for game:', gameId);
 })();
 // ============================================
 // END LOAD PROGRESS REPORTER
@@ -254,9 +254,11 @@ const base64ToUint8Array = (base64) => {
 	return bytes;
 };
 
-// Save current game state to backend (FIXED VERSION)
-const saveStateToBackend = async () => {
-	if (!AUTO_SAVE_CONFIG.enabled) return;
+// Save current game state to backend (MODIFIED - supports manual saves)
+const saveStateToBackend = async (forceSave = false) => {
+	// Allow manual saves even if auto-save is disabled
+	if (!AUTO_SAVE_CONFIG.enabled && !forceSave) return;
+
 	if (saveInProgress) {
 		log("Save already in progress, skipping");
 		return;
@@ -267,6 +269,7 @@ const saveStateToBackend = async () => {
 	const emulator = getEmulator();
 
 	if (!token || !gameId || !emulator || !emulator.gameManager) {
+		console.warn("[AutoSave] Cannot save: missing token, gameId, or emulator");
 		return;
 	}
 
@@ -278,14 +281,14 @@ const saveStateToBackend = async () => {
 
 		if (!stateData || stateData.length === 0) {
 			log("Empty state data, skipping save");
+			saveInProgress = false;
 			return;
 		}
 
 		const base64Data = uint8ArrayToBase64(stateData);
 
 		const response = await fetch(
-			`${
-				AUTO_SAVE_CONFIG.serverUrl
+			`${AUTO_SAVE_CONFIG.serverUrl
 			}/api/v1/game-state/save?gameID=${encodeURIComponent(gameId)}`,
 			{
 				method: "POST",
@@ -310,14 +313,16 @@ const saveStateToBackend = async () => {
 		log("State saved successfully:", result);
 	} catch (error) {
 		console.error("[AutoSave] Error:", error);
+		throw error; // Re-throw so caller can handle it
 	} finally {
 		saveInProgress = false;
 	}
 };
 
-// Load saved game state from backend (IMPROVED)
+// Load saved game state from backend (MODIFIED - always loads if available)
 const loadStateFromBackend = async () => {
-	if (!AUTO_SAVE_CONFIG.enabled) return null;
+	// Always try to load saved state, regardless of AUTO_SAVE_CONFIG.enabled
+	// This allows users to resume from their last save even if auto-save was disabled
 
 	const token = getAuthToken();
 	const gameId = getGameId();
@@ -399,6 +404,120 @@ const stopAutoSave = () => {
 		log("Auto-save stopped");
 	}
 };
+
+// ============================================
+// SAVE PROMPT FUNCTIONALITY
+// Note: The save prompt modal HTML is injected by saveStatePatcher.ts
+// ============================================
+
+let savePromptCountdown = null;
+let savePromptTimeout = null;
+
+/**
+ * Show save prompt modal with countdown
+ */
+const showSavePrompt = () => {
+	console.log('[Template] Showing save prompt');
+
+	pauseGame();
+
+	const modal = document.getElementById('savePromptModal');
+	if (!modal) {
+		console.warn('[Template] Save prompt modal not found');
+		endSession("User ended session");
+		return;
+	}
+
+	modal.style.display = 'flex';
+	const countdownEl = document.getElementById('saveCountdown');
+	let countdown = 10;
+
+	// Update countdown display
+	function updateCountdown() {
+		if (countdownEl) {
+			countdownEl.textContent = countdown.toString();
+		}
+
+		if (countdown <= 0) {
+			// Timeout - discard progress
+			console.log('[Template] Save prompt timeout - discarding progress');
+			hideSavePrompt();
+			endSession("User ended session");
+			return;
+		}
+
+		countdown--;
+		savePromptCountdown = setTimeout(updateCountdown, 1000);
+	}
+
+	// Start countdown
+	updateCountdown();
+
+	// Set timeout for auto-dismiss
+	savePromptTimeout = setTimeout(() => {
+		if (modal.style.display === 'flex') {
+			console.log('[Template] Save prompt auto-dismissed after timeout');
+			hideSavePrompt();
+			endSession("User ended session");
+		}
+	}, 10000);
+
+	// Set up button handlers
+	const yesBtn = document.getElementById('saveYesBtn');
+	const noBtn = document.getElementById('saveNoBtn');
+
+	if (yesBtn) {
+		yesBtn.onclick = function () {
+			console.log('[Template] User chose to save');
+			hideSavePrompt();
+
+			// Save and then end session (force save even if auto-save is disabled)
+			saveStateToBackend(true)
+				.then(() => {
+					console.log('[Template] Game state saved successfully');
+					endSession("User ended session");
+				})
+				.catch((error) => {
+					console.error('[Template] Error saving game state:', error);
+					// Still end session even if save failed
+					endSession("User ended session");
+				});
+		};
+	}
+
+	if (noBtn) {
+		noBtn.onclick = function () {
+			console.log('[Template] User chose to discard');
+			hideSavePrompt();
+			endSession("User ended session");
+		};
+	}
+};
+
+/**
+ * Hide save prompt modal
+ */
+const hideSavePrompt = () => {
+	const modal = document.getElementById('savePromptModal');
+	if (modal) {
+		modal.style.display = 'none';
+	}
+
+	// Clear countdown and timeout
+	if (savePromptCountdown) {
+		clearTimeout(savePromptCountdown);
+		savePromptCountdown = null;
+	}
+	if (savePromptTimeout) {
+		clearTimeout(savePromptTimeout);
+		savePromptTimeout = null;
+	}
+};
+
+// Make showSavePrompt and saveStateToBackend available globally for Electron app integration
+window.showSavePrompt = showSavePrompt;
+window.saveStateToBackend = saveStateToBackend;
+window.endSession = endSession;
 
 // ============================================
 // GAME INITIALIZATION (MODIFIED)
@@ -704,12 +823,12 @@ const startHealthCheck = () => {
 	}, 30000); // Send health check every 30 seconds
 };
 
-// End session with reason (MODIFIED - added auto-save)
+// End session with reason (MODIFIED - removed auto-save, user chooses to save)
 const endSession = async (reason) => {
 	isGameActive = false;
 
-	// Save one final time before ending
-	//REMOVED: await saveStateToBackend();
+	// REMOVED: await saveStateToBackend();
+	// User will have already chosen to save or not via the save prompt
 
 	clearInterval(timerInterval);
 	clearInterval(healthCheckInterval);
@@ -744,7 +863,14 @@ const handleMessage = (event) => {
 	if (!action) return;
 
 	const actions = {
-		end: () => endSession("User ended session"),
+		end: () => {
+			// Show save prompt before ending
+			if (typeof showSavePrompt === 'function') {
+				showSavePrompt();
+			} else {
+				endSession("User ended session");
+			}
+		},
 		continue: () => {
 			resetTimer();
 			resumeGame();
