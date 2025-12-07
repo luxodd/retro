@@ -39,7 +39,7 @@ EJS_threads = typeof SharedArrayBuffer !== "undefined"; // Enable threading if s
 // AUTO-SAVE CONFIGURATION
 // ============================================
 const AUTO_SAVE_CONFIG = {
-	enabled: true,
+	enabled: false,
 	saveIntervalSeconds: 30,
 	serverUrl: window.location.origin,
 	enableDebugLogs: true,
@@ -427,7 +427,7 @@ const initGame = async () => {
 	}
 
 	startGameTimer();
-	startAutoSave();
+	//startAutoSave(); //Disabled because user can choose to save at end.
 };
 
 EJS_onGameStart = initGame;
