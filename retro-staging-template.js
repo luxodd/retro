@@ -907,6 +907,7 @@ const startHealthCheck = () => {
 
 // End session with reason (MODIFIED - removed auto-save, user chooses to save)
 async function endSession(reason) {
+	console.trace('[endSession] Called with reason:', reason);
 	isGameActive = false;
 
 	// REMOVED: await saveStateToBackend();
