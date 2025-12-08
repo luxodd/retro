@@ -635,11 +635,11 @@ EJS_onGameStart = initGame;
 EJS_onLoadState = initGame;
 
 // Hook into manual saves - when user presses save button in emulator
-EJS_onSaveUpdate = function (event) {
-	if (AUTO_SAVE_CONFIG.enabled) {
-		saveStateToBackend();
-	}
-};
+//EJS_onSaveUpdate = function (event) {
+//	if (AUTO_SAVE_CONFIG.enabled) {
+//		saveStateToBackend();
+//	}
+//};
 
 // Fallback function to detect when game is ready
 const checkGameReady = () => {
