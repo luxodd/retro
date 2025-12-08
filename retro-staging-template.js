@@ -906,7 +906,7 @@ const startHealthCheck = () => {
 };
 
 // End session with reason (MODIFIED - removed auto-save, user chooses to save)
-const endSession = async (reason) => {
+async function endSession(reason) {
 	isGameActive = false;
 
 	// REMOVED: await saveStateToBackend();
@@ -930,7 +930,7 @@ const endSession = async (reason) => {
 		// Fallback for web browser
 		window.location.href = "/selectGame";
 	}
-};
+}
 
 // Message handlers
 const handleMessage = (event) => {
