@@ -673,8 +673,13 @@ const updateTimerDisplay = () => {
 // Universal end trigger (timer expiry & game-specific death logic)
 const inGameTrx = () => {
 	pauseGame();
-	if (window.parent !== window) {
-		window.parent.postMessage({ type: 'session_options' }, '*');
+	if (typeof showSavePrompt === 'function') {
+		showSavePrompt();
+	} else {
+		// Fallback if showSavePrompt is not available
+		if (window.parent !== window) {
+			window.parent.postMessage({ type: 'session_options' }, '*');
+		}
 	}
 };
 window.inGameTrx = inGameTrx;
