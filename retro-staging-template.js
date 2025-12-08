@@ -407,8 +407,85 @@ const stopAutoSave = () => {
 
 // ============================================
 // SAVE PROMPT FUNCTIONALITY
-// Note: The save prompt modal HTML is injected by saveStatePatcher.ts
+// Note: The save prompt modal HTML is self-injected below for browser compatibility
 // ============================================
+
+// Self-inject save prompt modal HTML (works in both Electron and browser)
+(function injectSavePromptModal() {
+	// Check if modal already exists (in case it was injected by saveStatePatcher.ts)
+	if (document.getElementById('savePromptModal')) {
+		return;
+	}
+
+	// Create modal container
+	const modal = document.createElement('div');
+	modal.id = 'savePromptModal';
+	modal.style.cssText = 'display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); z-index: 999999; justify-content: center; align-items: center; font-family: Arial, sans-serif;';
+
+	// Create modal content
+	const content = document.createElement('div');
+	content.style.cssText = 'background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 40px; border-radius: 20px; box-shadow: 0 20px 60px rgba(0,0,0,0.5); text-align: center; max-width: 500px;';
+
+	// Create title
+	const title = document.createElement('h2');
+	title.textContent = 'Save Your Progress?';
+	title.style.cssText = 'color: white; font-size: 32px; margin: 0 0 20px 0; text-shadow: 0 2px 10px rgba(0,0,0,0.3);';
+
+	// Create description
+	const desc = document.createElement('p');
+	desc.textContent = "Your progress will be lost if you don't save.";
+	desc.style.cssText = 'color: #f0f0f0; font-size: 18px; margin: 0 0 10px 0;';
+
+	// Create countdown
+	const countdown = document.createElement('p');
+	countdown.id = 'saveCountdown';
+	countdown.textContent = '10';
+	countdown.style.cssText = 'color: #ffd700; font-size: 24px; font-weight: bold; margin: 0 0 30px 0;';
+
+	// Create button container
+	const buttonContainer = document.createElement('div');
+	buttonContainer.style.cssText = 'display: flex; gap: 20px; justify-content: center;';
+
+	// Create Yes button
+	const yesBtn = document.createElement('button');
+	yesBtn.id = 'saveYesBtn';
+	yesBtn.textContent = 'Yes, Save';
+	yesBtn.style.cssText = 'background: #4CAF50; color: white; border: none; padding: 15px 30px; font-size: 18px; border-radius: 10px; cursor: pointer; font-weight: bold; box-shadow: 0 4px 15px rgba(76, 175, 80, 0.4); transition: transform 0.2s;';
+
+	// Create No button
+	const noBtn = document.createElement('button');
+	noBtn.id = 'saveNoBtn';
+	noBtn.textContent = 'No, Discard';
+	noBtn.style.cssText = 'background: #f44336; color: white; border: none; padding: 15px 30px; font-size: 18px; border-radius: 10px; cursor: pointer; font-weight: bold; box-shadow: 0 4px 15px rgba(244, 67, 54, 0.4); transition: transform 0.2s;';
+
+	// Assemble DOM structure
+	buttonContainer.appendChild(yesBtn);
+	buttonContainer.appendChild(noBtn);
+	content.appendChild(title);
+	content.appendChild(desc);
+	content.appendChild(countdown);
+	content.appendChild(buttonContainer);
+	modal.appendChild(content);
+
+	// Inject into body
+	if (document.body) {
+		document.body.appendChild(modal);
+	} else {
+		// Wait for DOM if body doesn't exist yet
+		if (document.readyState === 'loading') {
+			document.addEventListener('DOMContentLoaded', function () {
+				document.body.appendChild(modal);
+			});
+		} else {
+			// Fallback: create body if it doesn't exist
+			const body = document.body || document.createElement('body');
+			body.appendChild(modal);
+			if (!document.body) {
+				document.appendChild(body);
+			}
+		}
+	}
+})();
 
 let savePromptCountdown = null;
 let savePromptTimeout = null;
