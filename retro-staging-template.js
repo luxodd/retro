@@ -610,6 +610,17 @@ const initGame = async () => {
 	gameLoaded = true;
 	storeEmulator();
 
+	// Wait for token to be available (with timeout) before loading state
+	// This ensures authenticated requests can be made if token arrives via message
+	const maxWaitTime = 2000; // Wait up to 2 seconds for token
+	const checkInterval = 100; // Check every 100ms
+	let waited = 0;
+	
+	while (!gameToken && waited < maxWaitTime) {
+		await new Promise(resolve => setTimeout(resolve, checkInterval));
+		waited += checkInterval;
+	}
+
 	// Try to load saved state before starting timer
 	const savedState = await loadStateFromBackend();
 	if (savedState) {
