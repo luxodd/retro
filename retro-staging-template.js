@@ -975,6 +975,10 @@ const handleMessage = (event) => {
 			}
 		},
 		continue: () => {
+			// Hide save prompt if it's showing (after successful payment)
+			if (typeof hideSavePrompt === 'function') {
+				hideSavePrompt();
+			}
 			resetTimer();
 			resumeGame();
 		},
