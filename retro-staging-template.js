@@ -30,7 +30,7 @@ EJS_color = "#0064ff"; // Theme color
 EJS_startOnLoaded = true;
 EJS_pathtodata = "https://cdn.emulatorjs.org/stable/data/";
 EJS_gameUrl = "{{GAME_FILE}}"; // ROM/ISO filename
-{{LOAD_STATE_URL}}EJS_language = "en-US";
+{ { LOAD_STATE_URL } } EJS_language = "en-US";
 
 // Performance Optimizations
 EJS_threads = typeof SharedArrayBuffer !== "undefined"; // Enable threading if supported
@@ -424,7 +424,19 @@ const stopAutoSave = () => {
 
 	// Create modal content
 	const content = document.createElement('div');
-	content.style.cssText = 'background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 40px; border-radius: 20px; box-shadow: 0 20px 60px rgba(0,0,0,0.5); text-align: center; max-width: 500px;';
+	content.style.cssText = 'background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 40px; border-radius: 20px; box-shadow: 0 20px 60px rgba(0,0,0,0.5); text-align: center; max-width: 500px; position: relative;';
+
+	// Create close button (X) in upper left
+	const closeBtn = document.createElement('button');
+	closeBtn.id = 'saveCloseBtn';
+	closeBtn.innerHTML = '&times;';
+	closeBtn.setAttribute('aria-label', 'Close and resume playing');
+	closeBtn.setAttribute('tabindex', '0');
+	closeBtn.style.cssText = 'position: absolute; top: 10px; left: 10px; background: rgba(255,255,255,0.2); color: white; border: 2px solid rgba(255,255,255,0.3); width: 40px; height: 40px; border-radius: 50%; font-size: 28px; cursor: pointer; font-weight: bold; display: flex; align-items: center; justify-content: center; transition: all 0.2s; outline: none;';
+	closeBtn.onmouseenter = function () { this.style.background = 'rgba(255,255,255,0.3)'; this.style.transform = 'scale(1.1)'; };
+	closeBtn.onmouseleave = function () { this.style.background = 'rgba(255,255,255,0.2)'; this.style.transform = 'scale(1)'; };
+	closeBtn.onfocus = function () { this.style.background = 'rgba(255,255,255,0.3)'; this.style.borderColor = 'rgba(255,255,255,0.6)'; this.style.boxShadow = '0 0 10px rgba(255,255,255,0.5)'; };
+	closeBtn.onblur = function () { this.style.background = 'rgba(255,255,255,0.2)'; this.style.borderColor = 'rgba(255,255,255,0.3)'; this.style.boxShadow = 'none'; };
 
 	// Create title
 	const title = document.createElement('h2');
@@ -450,15 +462,28 @@ const stopAutoSave = () => {
 	const yesBtn = document.createElement('button');
 	yesBtn.id = 'saveYesBtn';
 	yesBtn.textContent = 'Yes, Save';
-	yesBtn.style.cssText = 'background: #4CAF50; color: white; border: none; padding: 15px 30px; font-size: 18px; border-radius: 10px; cursor: pointer; font-weight: bold; box-shadow: 0 4px 15px rgba(76, 175, 80, 0.4); transition: transform 0.2s;';
+	yesBtn.setAttribute('tabindex', '0');
+	yesBtn.setAttribute('aria-label', 'Yes, Save');
+	yesBtn.style.cssText = 'background: #4CAF50; color: white; border: 2px solid transparent; padding: 15px 30px; font-size: 18px; border-radius: 10px; cursor: pointer; font-weight: bold; box-shadow: 0 4px 15px rgba(76, 175, 80, 0.4); transition: all 0.2s; outline: none; min-width: 150px;';
+	yesBtn.onmouseenter = function () { this.style.transform = 'scale(1.05)'; this.style.boxShadow = '0 6px 20px rgba(76, 175, 80, 0.6)'; };
+	yesBtn.onmouseleave = function () { this.style.transform = 'scale(1)'; this.style.boxShadow = '0 4px 15px rgba(76, 175, 80, 0.4)'; };
+	yesBtn.onfocus = function () { this.style.borderColor = 'rgba(255,255,255,0.8)'; this.style.boxShadow = '0 0 20px rgba(76, 175, 80, 0.8), 0 4px 15px rgba(76, 175, 80, 0.4)'; };
+	yesBtn.onblur = function () { this.style.borderColor = 'transparent'; this.style.boxShadow = '0 4px 15px rgba(76, 175, 80, 0.4)'; };
 
 	// Create No button
 	const noBtn = document.createElement('button');
 	noBtn.id = 'saveNoBtn';
 	noBtn.textContent = 'No, Discard';
-	noBtn.style.cssText = 'background: #f44336; color: white; border: none; padding: 15px 30px; font-size: 18px; border-radius: 10px; cursor: pointer; font-weight: bold; box-shadow: 0 4px 15px rgba(244, 67, 54, 0.4); transition: transform 0.2s;';
+	noBtn.setAttribute('tabindex', '0');
+	noBtn.setAttribute('aria-label', 'No, Discard');
+	noBtn.style.cssText = 'background: #f44336; color: white; border: 2px solid transparent; padding: 15px 30px; font-size: 18px; border-radius: 10px; cursor: pointer; font-weight: bold; box-shadow: 0 4px 15px rgba(244, 67, 54, 0.4); transition: all 0.2s; outline: none; min-width: 150px;';
+	noBtn.onmouseenter = function () { this.style.transform = 'scale(1.05)'; this.style.boxShadow = '0 6px 20px rgba(244, 67, 54, 0.6)'; };
+	noBtn.onmouseleave = function () { this.style.transform = 'scale(1)'; this.style.boxShadow = '0 4px 15px rgba(244, 67, 54, 0.4)'; };
+	noBtn.onfocus = function () { this.style.borderColor = 'rgba(255,255,255,0.8)'; this.style.boxShadow = '0 0 20px rgba(244, 67, 54, 0.8), 0 4px 15px rgba(244, 67, 54, 0.4)'; };
+	noBtn.onblur = function () { this.style.borderColor = 'transparent'; this.style.boxShadow = '0 4px 15px rgba(244, 67, 54, 0.4)'; };
 
 	// Assemble DOM structure
+	content.appendChild(closeBtn);
 	buttonContainer.appendChild(yesBtn);
 	buttonContainer.appendChild(noBtn);
 	content.appendChild(title);
@@ -489,6 +514,7 @@ const stopAutoSave = () => {
 
 let savePromptCountdown = null;
 let savePromptTimeout = null;
+let savePromptKeyboardHandler = null; // Store keyboard handler reference
 
 /**
  * Show save prompt modal with countdown
@@ -540,8 +566,98 @@ const showSavePrompt = () => {
 	}, 10000);
 
 	// Set up button handlers
+	const closeBtn = document.getElementById('saveCloseBtn');
 	const yesBtn = document.getElementById('saveYesBtn');
 	const noBtn = document.getElementById('saveNoBtn');
+
+	// Function to resume game and close modal
+	const resumeAndClose = function () {
+		console.log('[Template] User closed save prompt - resuming game');
+		hideSavePrompt();
+		resumeGame();
+		// Reset savePromptShown flag so ESC can be used again
+		if (typeof window.savePromptShown !== 'undefined') {
+			window.savePromptShown = false;
+		}
+	};
+
+	// Close button handler (resume game)
+	if (closeBtn) {
+		closeBtn.setAttribute('tabindex', '0');
+		closeBtn.onclick = resumeAndClose;
+		// Also handle Enter/Space keys for accessibility
+		closeBtn.onkeydown = function (e) {
+			if (e.key === 'Enter' || e.key === ' ') {
+				e.preventDefault();
+				resumeAndClose();
+			}
+		};
+	}
+
+	// Keyboard navigation handler for joystick/arrow keys
+	savePromptKeyboardHandler = function (e) {
+		// Only handle if modal is visible
+		if (modal.style.display !== 'flex') return;
+
+		const focusableElements = [closeBtn, yesBtn, noBtn].filter(el => el !== null);
+		const currentIndex = focusableElements.indexOf(document.activeElement);
+
+		// Arrow key navigation (for joystick)
+		if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+			e.preventDefault();
+			let nextIndex;
+			if (e.key === 'ArrowLeft') {
+				nextIndex = currentIndex > 0 ? currentIndex - 1 : focusableElements.length - 1;
+			} else {
+				nextIndex = currentIndex < focusableElements.length - 1 ? currentIndex + 1 : 0;
+			}
+			focusableElements[nextIndex].focus();
+		}
+		// Tab navigation (standard keyboard)
+		else if (e.key === 'Tab') {
+			// Let default Tab behavior work, but ensure focus stays within modal
+			const lastElement = focusableElements[focusableElements.length - 1];
+			const firstElement = focusableElements[0];
+
+			if (e.shiftKey && document.activeElement === firstElement) {
+				e.preventDefault();
+				lastElement.focus();
+			} else if (!e.shiftKey && document.activeElement === lastElement) {
+				e.preventDefault();
+				firstElement.focus();
+			}
+		}
+		// Enter/Space to activate focused button
+		else if (e.key === 'Enter' || e.key === ' ') {
+			if (document.activeElement === closeBtn) {
+				e.preventDefault();
+				resumeAndClose();
+			} else if (document.activeElement === yesBtn) {
+				e.preventDefault();
+				yesBtn.click();
+			} else if (document.activeElement === noBtn) {
+				e.preventDefault();
+				noBtn.click();
+			}
+		}
+		// ESC to close (same as X button)
+		else if (e.key === 'Escape') {
+			e.preventDefault();
+			resumeAndClose();
+		}
+	};
+
+	// Add keyboard event listener to modal
+	modal.addEventListener('keydown', savePromptKeyboardHandler);
+
+	// Focus first button when modal opens
+	setTimeout(() => {
+		if (closeBtn) {
+			closeBtn.focus();
+		} else if (yesBtn) {
+			yesBtn.focus();
+		}
+	}, 100);
 
 	if (yesBtn) {
 		yesBtn.onclick = function () {
@@ -560,6 +676,13 @@ const showSavePrompt = () => {
 					endSession("User ended session");
 				});
 		};
+		// Also handle Enter/Space keys for accessibility
+		yesBtn.onkeydown = function (e) {
+			if (e.key === 'Enter' || e.key === ' ') {
+				e.preventDefault();
+				yesBtn.click();
+			}
+		};
 	}
 
 	if (noBtn) {
@@ -567,6 +690,13 @@ const showSavePrompt = () => {
 			console.log('[Template] User chose to discard');
 			hideSavePrompt();
 			endSession("User ended session");
+		};
+		// Also handle Enter/Space keys for accessibility
+		noBtn.onkeydown = function (e) {
+			if (e.key === 'Enter' || e.key === ' ') {
+				e.preventDefault();
+				noBtn.click();
+			}
 		};
 	}
 };
@@ -578,6 +708,11 @@ const hideSavePrompt = () => {
 	const modal = document.getElementById('savePromptModal');
 	if (modal) {
 		modal.style.display = 'none';
+		// Remove keyboard event listener if it exists
+		if (savePromptKeyboardHandler) {
+			modal.removeEventListener('keydown', savePromptKeyboardHandler);
+			savePromptKeyboardHandler = null;
+		}
 	}
 
 	// Clear countdown and timeout
@@ -615,7 +750,7 @@ const initGame = async () => {
 	const maxWaitTime = 2000; // Wait up to 2 seconds for token
 	const checkInterval = 100; // Check every 100ms
 	let waited = 0;
-	
+
 	while (!gameToken && waited < maxWaitTime) {
 		await new Promise(resolve => setTimeout(resolve, checkInterval));
 		waited += checkInterval;
@@ -1050,6 +1185,35 @@ window.addEventListener("message", (event) => {
 		}
 	}
 });
+
+// Direct ESC key handler for save prompt (more reliable than history.back interception)
+document.addEventListener('keydown', function (e) {
+	// Only handle ESC key
+	if (e.key !== 'Escape' || e.defaultPrevented) {
+		return;
+	}
+
+	// Check if modal is currently visible - if so, let the modal handle ESC
+	const saveModal = document.getElementById('savePromptModal');
+	if (saveModal && saveModal.style.display === 'flex') {
+		// Modal is open - let its keyboard handler deal with ESC
+		return;
+	}
+
+	// Check if we're in a game context and save prompt isn't already shown
+	if (isGameActive && gameLoaded && !window.savePromptShown) {
+		// Check if we're not already in a modal
+		const paymentModal = document.getElementById('paymentModal');
+
+		if (!paymentModal || paymentModal.style.display === 'none') {
+			console.log('[Template] ESC key pressed - showing save prompt');
+			e.preventDefault();
+			e.stopPropagation();
+			window.savePromptShown = true;
+			showSavePrompt();
+		}
+	}
+}, true); // Use capture phase to catch before other handlers
 
 // Initialize
 const initialize = () => {
