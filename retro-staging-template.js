@@ -146,7 +146,8 @@ let lastSaveTimestamp = null;
 // Timer variables
 let gameTimer = GAME_TIMER_SECONDS;
 let timerInterval;
-let gameToken;
+// Initialize gameToken from window.gameToken if available (set by launcher generator)
+let gameToken = (typeof window !== 'undefined' && window.gameToken) ? window.gameToken : undefined;
 let timerStarted = false;
 let gameLoaded = false;
 
@@ -210,7 +211,14 @@ const getGameId = () => {
 	return sanitized;
 };
 
-const getAuthToken = () => gameToken;
+const getAuthToken = () => {
+	// Check window.gameToken first (set by launcher generator)
+	if (typeof window !== 'undefined' && window.gameToken) {
+		return window.gameToken;
+	}
+	// Fallback to gameToken variable
+	return gameToken;
+};
 
 // Helper: Convert Uint8Array to base64 (handles large arrays)
 const uint8ArrayToBase64 = (uint8Array) => {
