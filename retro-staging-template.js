@@ -146,8 +146,7 @@ let lastSaveTimestamp = null;
 // Timer variables
 let gameTimer = GAME_TIMER_SECONDS;
 let timerInterval;
-// Initialize gameToken from window.gameToken if available (set by launcher generator)
-let gameToken = (typeof window !== 'undefined' && window.gameToken) ? window.gameToken : undefined;
+let gameToken;
 let timerStarted = false;
 let gameLoaded = false;
 
@@ -211,14 +210,7 @@ const getGameId = () => {
 	return sanitized;
 };
 
-const getAuthToken = () => {
-	// Check window.gameToken first (set by launcher generator)
-	if (typeof window !== 'undefined' && window.gameToken) {
-		return window.gameToken;
-	}
-	// Fallback to gameToken variable
-	return gameToken;
-};
+const getAuthToken = () => gameToken;
 
 // Helper: Convert Uint8Array to base64 (handles large arrays)
 const uint8ArrayToBase64 = (uint8Array) => {
@@ -964,12 +956,13 @@ const initializeWebSocket = () => {
 	try {
 		serverHost = window.parent.location.host;
 	} catch (e) {
-		// Fallback: extract from referrer or use default
+		// Fallback: extract from referrer or use current location
 		if (document.referrer) {
 			const referrerUrl = new URL(document.referrer);
 			serverHost = referrerUrl.host;
 		} else {
-			serverHost = window.location.hostname + ":8080";
+			// Use current location's host (includes port if specified)
+			serverHost = window.location.host || window.location.hostname + (window.location.port ? ':' + window.location.port : '');
 		}
 	}
 
