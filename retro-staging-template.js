@@ -320,7 +320,7 @@ const loadStateFromBackend = async () => {
 		return null;
 	}
 
-	log(`Loading state for game: ${gameId}, token available: ${!!token}`);
+	log(`Loading state for game: ${gameId}`);
 
 	try {
 		const url = new URL(`${AUTO_SAVE_CONFIG.serverUrl}/api/v1/game-state/load`);
@@ -329,17 +329,13 @@ const loadStateFromBackend = async () => {
 		const headers = {};
 		if (token) {
 			headers["Authorization"] = `Bearer ${token}`;
-		} else {
-			log("Warning: No token available for loading saved state");
 		}
 
-		log(`Fetching saved state from: ${url.toString()}`);
 		const response = await fetch(url.toString(), {
 			method: "GET",
 			headers: headers,
 		});
 
-		log(`Save state response status: ${response.status}`);
 		if (response.status === 404) {
 			log("No saved state found on backend, trying local state file...");
 			try {
@@ -750,9 +746,6 @@ const initGame = async () => {
 	}
 
 	// Try to load saved state before starting timer
-	// Wait a bit for emulator to be fully ready
-	await new Promise(resolve => setTimeout(resolve, 500));
-
 	const savedState = await loadStateFromBackend();
 	if (savedState) {
 		try {
@@ -762,27 +755,11 @@ const initGame = async () => {
 				// Use loadState() with Uint8Array
 				emulator.gameManager.loadState(savedState);
 				log("State restored!");
-			} else {
-				log("Emulator not ready yet, will retry loading state...");
-				// Retry after a short delay
-				setTimeout(async () => {
-					const retryEmulator = getEmulator();
-					if (retryEmulator && retryEmulator.gameManager) {
-						try {
-							retryEmulator.gameManager.loadState(savedState);
-							log("State restored on retry!");
-						} catch (error) {
-							console.error("[AutoSave] Failed to restore state on retry:", error);
-						}
-					}
-				}, 1000);
 			}
 		} catch (error) {
 			console.error("[AutoSave] Failed to restore state:", error);
 			log("Starting fresh game instead");
 		}
-	} else {
-		log("No saved state found on backend");
 	}
 
 	startGameTimer();
@@ -1205,12 +1182,9 @@ document.addEventListener('keydown', function (e) {
 		return;
 	}
 
-	console.log('[Template] ESC key detected - isGameActive:', isGameActive, 'gameLoaded:', gameLoaded, 'savePromptShown:', window.savePromptShown);
-
 	// Check if modal is currently visible - if so, let the modal handle ESC
 	const saveModal = document.getElementById('savePromptModal');
 	if (saveModal && saveModal.style.display === 'flex') {
-		console.log('[Template] Modal is open, letting modal handle ESC');
 		// Modal is open - let its keyboard handler deal with ESC
 		return;
 	}
@@ -1226,11 +1200,7 @@ document.addEventListener('keydown', function (e) {
 			e.stopPropagation();
 			window.savePromptShown = true;
 			showSavePrompt();
-		} else {
-			console.log('[Template] Payment modal is open, not showing save prompt');
 		}
-	} else {
-		console.log('[Template] ESC key ignored - isGameActive:', isGameActive, 'gameLoaded:', gameLoaded, 'savePromptShown:', window.savePromptShown);
 	}
 }, true); // Use capture phase to catch before other handlers
 
