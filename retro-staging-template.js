@@ -1138,7 +1138,11 @@ window.savePromptShown = false;
 // Intercept window.history.back() calls (triggered by Escape/physical back button)
 const originalHistoryBack = window.history.back;
 window.history.back = function () {
-	if (isGameActive && gameLoaded && !window.savePromptShown) {
+	// Show save prompt if game is active (even if not fully loaded yet) and we're in a game context
+	// Check if we're in an iframe (game context) or if game has loaded
+	const isInGameContext = window.parent !== window || gameLoaded;
+	
+	if (isGameActive && isInGameContext && !window.savePromptShown) {
 		console.log('[Template] Back navigation intercepted - showing save prompt');
 		// Show save prompt instead of navigating
 		if (typeof showSavePrompt === 'function') {
@@ -1148,7 +1152,7 @@ window.history.back = function () {
 			return;
 		}
 	}
-	// If save prompt not available or game not loaded, proceed with normal navigation
+	// If save prompt not available or not in game context, proceed with normal navigation
 	originalHistoryBack.call(window.history);
 };
 
@@ -1178,7 +1182,10 @@ window.addEventListener("beforeunload", (event) => {
 window.addEventListener("message", (event) => {
 	// Check if this is a navigate-back message (could come from parent window)
 	if (event.data && (event.data === 'navigate-back' || event.data.type === 'navigate-back')) {
-		if (isGameActive && gameLoaded && !window.savePromptShown) {
+		// Check if we're in an iframe (game context) or if game has loaded
+		const isInGameContext = window.parent !== window || gameLoaded;
+		
+		if (isGameActive && isInGameContext && !window.savePromptShown) {
 			console.log('[Template] Navigate-back message received - showing save prompt');
 			if (typeof showSavePrompt === 'function') {
 				window.savePromptShown = true;
@@ -1203,7 +1210,10 @@ document.addEventListener('keydown', function (e) {
 	}
 
 	// Check if we're in a game context and save prompt isn't already shown
-	if (isGameActive && gameLoaded && !window.savePromptShown) {
+	// Check if we're in an iframe (game context) or if game has loaded
+	const isInGameContext = window.parent !== window || gameLoaded;
+	
+	if (isGameActive && isInGameContext && !window.savePromptShown) {
 		// Check if we're not already in a modal
 		const paymentModal = document.getElementById('paymentModal');
 
