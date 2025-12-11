@@ -30,7 +30,7 @@ EJS_color = "#0064ff"; // Theme color
 EJS_startOnLoaded = true;
 EJS_pathtodata = "https://cdn.emulatorjs.org/stable/data/";
 EJS_gameUrl = "{{GAME_FILE}}"; // ROM/ISO filename
-{ { LOAD_STATE_URL } }
+{{LOAD_STATE_URL}}
 EJS_language = "en-US";
 
 // Performance Optimizations
@@ -102,7 +102,18 @@ let lastSaveTimestamp = null;
 	});
 
 	// Hook into EmulatorJS lifecycle
-	// Note: We'll wrap EJS_onGameStart after initGame is defined (see below)
+	const originalOnGameStart = window.EJS_onGameStart;
+	window.EJS_onGameStart = function() {
+		reportProgress(90, 'EmulatorJS game starting');
+		if (originalOnGameStart) {
+			originalOnGameStart();
+		}
+
+		// Report full completion shortly after game starts
+		setTimeout(function() {
+			reportProgress(100, 'Game fully loaded');
+		}, 2000);
+	};
 
 	// Heartbeat - periodically report progress to prevent timeout
 	// This is crucial for slow machines or large ROMs
