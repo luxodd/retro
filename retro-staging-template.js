@@ -30,7 +30,8 @@ EJS_color = "#0064ff"; // Theme color
 EJS_startOnLoaded = true;
 EJS_pathtodata = "https://cdn.emulatorjs.org/stable/data/";
 EJS_gameUrl = "{{GAME_FILE}}"; // ROM/ISO filename
-{ { LOAD_STATE_URL } } EJS_language = "en-US";
+{ { LOAD_STATE_URL } }
+EJS_language = "en-US";
 
 // Performance Optimizations
 EJS_threads = typeof SharedArrayBuffer !== "undefined"; // Enable threading if supported
