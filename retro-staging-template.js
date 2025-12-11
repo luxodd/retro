@@ -101,18 +101,7 @@ let lastSaveTimestamp = null;
 	});
 
 	// Hook into EmulatorJS lifecycle
-	const originalOnGameStart = window.EJS_onGameStart;
-	window.EJS_onGameStart = function () {
-		reportProgress(90, 'EmulatorJS game starting');
-		if (originalOnGameStart) {
-			originalOnGameStart();
-		}
-
-		// Report full completion shortly after game starts
-		setTimeout(function () {
-			reportProgress(100, 'Game fully loaded');
-		}, 2000);
-	};
+	// Note: We'll wrap EJS_onGameStart after initGame is defined (see below)
 
 	// Heartbeat - periodically report progress to prevent timeout
 	// This is crucial for slow machines or large ROMs
@@ -412,8 +401,8 @@ const stopAutoSave = () => {
 
 // Self-inject save prompt modal HTML (works in both Electron and browser)
 (function injectSavePromptModal() {
-	// Check if modal already exists (in case it was injected by saveStatePatcher.ts)
-	if (document.getElementById('savePromptModal')) {
+	const existingModal = document.getElementById('savePromptModal');
+	if (existingModal) {
 		return;
 	}
 
