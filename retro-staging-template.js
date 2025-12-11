@@ -30,7 +30,7 @@ EJS_color = "#0064ff"; // Theme color
 EJS_startOnLoaded = true;
 EJS_pathtodata = "https://cdn.emulatorjs.org/stable/data/";
 EJS_gameUrl = "{{GAME_FILE}}"; // ROM/ISO filename
-{{LOAD_STATE_URL}}
+{ { LOAD_STATE_URL } }
 EJS_language = "en-US";
 
 // Performance Optimizations
@@ -103,14 +103,14 @@ let lastSaveTimestamp = null;
 
 	// Hook into EmulatorJS lifecycle
 	const originalOnGameStart = window.EJS_onGameStart;
-	window.EJS_onGameStart = function() {
+	window.EJS_onGameStart = function () {
 		reportProgress(90, 'EmulatorJS game starting');
 		if (originalOnGameStart) {
 			originalOnGameStart();
 		}
 
 		// Report full completion shortly after game starts
-		setTimeout(function() {
+		setTimeout(function () {
 			reportProgress(100, 'Game fully loaded');
 		}, 2000);
 	};
@@ -1141,7 +1141,7 @@ window.history.back = function () {
 	// Show save prompt if game is active (even if not fully loaded yet) and we're in a game context
 	// Check if we're in an iframe (game context) or if game has loaded
 	const isInGameContext = window.parent !== window || gameLoaded;
-	
+
 	if (isGameActive && isInGameContext && !window.savePromptShown) {
 		console.log('[Template] Back navigation intercepted - showing save prompt');
 		// Show save prompt instead of navigating
@@ -1182,10 +1182,18 @@ window.addEventListener("beforeunload", (event) => {
 window.addEventListener("message", (event) => {
 	// Check if this is a navigate-back message (could come from parent window)
 	if (event.data && (event.data === 'navigate-back' || event.data.type === 'navigate-back')) {
-		// Check if we're in an iframe (game context) or if game has loaded
-		const isInGameContext = window.parent !== window || gameLoaded;
-		
-		if (isGameActive && isInGameContext && !window.savePromptShown) {
+		// For iframes, be more lenient - show prompt if we're in an iframe and it hasn't been shown
+		// For non-iframe contexts, check isGameActive and isInGameContext
+		const isInIframe = window.parent !== window;
+		const isInGameContext = isInIframe || gameLoaded;
+
+		// CRITICAL FIX: For iframes, always show prompt when navigate-back is received (unless already shown)
+		// This ensures ESC works even if gameLoaded isn't set yet
+		const shouldShow = isInIframe
+			? !window.savePromptShown
+			: (isGameActive && isInGameContext && !window.savePromptShown);
+
+		if (shouldShow) {
 			console.log('[Template] Navigate-back message received - showing save prompt');
 			if (typeof showSavePrompt === 'function') {
 				window.savePromptShown = true;
@@ -1209,11 +1217,18 @@ document.addEventListener('keydown', function (e) {
 		return;
 	}
 
-	// Check if we're in a game context and save prompt isn't already shown
-	// Check if we're in an iframe (game context) or if game has loaded
-	const isInGameContext = window.parent !== window || gameLoaded;
-	
-	if (isGameActive && isInGameContext && !window.savePromptShown) {
+	// CRITICAL FIX: For iframes, be more lenient - show prompt if we're in an iframe
+	// For non-iframe contexts, check isGameActive and isInGameContext
+	const isInIframe = window.parent !== window;
+	const isInGameContext = isInIframe || gameLoaded;
+
+	// For iframes, always show prompt when ESC is pressed (unless already shown or modal is open)
+	// This ensures ESC works even if gameLoaded isn't set yet
+	const shouldShow = isInIframe
+		? !window.savePromptShown
+		: (isGameActive && isInGameContext && !window.savePromptShown);
+
+	if (shouldShow) {
 		// Check if we're not already in a modal
 		const paymentModal = document.getElementById('paymentModal');
 
