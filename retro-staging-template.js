@@ -746,12 +746,7 @@ const hideSavePrompt = () => {
 	}
 };
 
-// Make showSavePrompt and saveStateToBackend available globally for Electron app integration
-window.showSavePrompt = showSavePrompt;
-window.saveStateToBackend = saveStateToBackend;
-window.endSession = endSession;
-window.pauseGame = pauseGame;
-window.resumeGame = resumeGame;
+// NOTE: Global window assignments moved to end of file (after function definitions)
 
 // ============================================
 // GAME INITIALIZATION (MODIFIED)
@@ -1259,6 +1254,13 @@ document.addEventListener('keydown', function (e) {
 		}
 	}
 }, true); // Use capture phase to catch before other handlers
+
+// Make functions available globally for Electron app integration
+window.showSavePrompt = showSavePrompt;
+window.saveStateToBackend = saveStateToBackend;
+window.endSession = endSession;
+window.pauseGame = pauseGame;
+window.resumeGame = resumeGame;
 
 // Initialize
 const initialize = () => {
