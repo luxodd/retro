@@ -49,6 +49,7 @@ EJS_language = "en-US";
 
 // Performance Optimizations
 EJS_threads = typeof SharedArrayBuffer !== "undefined"; // Enable threading if supported
+EJS_forceLegacyCores = false; // Use modern cores, not legacy cores
 
 // ============================================
 // AUTO-SAVE CONFIGURATION
