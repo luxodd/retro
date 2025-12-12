@@ -44,7 +44,7 @@ EJS_color = "#0064ff"; // Theme color
 EJS_startOnLoaded = true;
 EJS_pathtodata = "https://cdn.emulatorjs.org/stable/data/";
 EJS_gameUrl = "{{GAME_FILE}}"; // ROM/ISO filename
-{ { LOAD_STATE_URL } }
+{{LOAD_STATE_URL}}
 EJS_language = "en-US";
 
 // Performance Optimizations
@@ -137,7 +137,7 @@ let lastSaveTimestamp = null;
 		const elapsed = Date.now() - startTime;
 
 		// Stop heartbeat after 2 minutes or when game loaded
-		if (elapsed > 120000 || gameLoaded) {
+		if (elapsed > 120000 || window.gameLoaded) {
 			clearInterval(heartbeatInterval);
 			return;
 		}
@@ -155,7 +155,7 @@ let lastSaveTimestamp = null;
 
 	// Fallback: Use the existing checkGameReady function as a progress indicator
 	const checkInterval = setInterval(function () {
-		if (gameLoaded) {
+		if (window.gameLoaded) {
 			clearInterval(checkInterval);
 			reportProgress(100, 'Game confirmed ready');
 		} else if (checkGameReady && checkGameReady()) {
@@ -761,6 +761,7 @@ window.resumeGame = resumeGame;
 // EmulatorJS callbacks
 const initGame = async () => {
 	gameLoaded = true;
+	window.gameLoaded = true;
 	storeEmulator();
 
 	// Wait for token to be available (with timeout) before loading state
@@ -812,6 +813,7 @@ const checkGameReady = () => {
 	if (canvas && canvas.width > 0 && canvas.height > 0) {
 		if (!gameLoaded) {
 			gameLoaded = true;
+			window.gameLoaded = true;
 			storeEmulator();
 			startGameTimer();
 		}
