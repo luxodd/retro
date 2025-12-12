@@ -1,4 +1,18 @@
 // ============================================
+// INITIALIZATION - Set state variables immediately
+// ============================================
+// Initialize game state variables immediately so message listeners work
+if (typeof window.gameLoaded === 'undefined') {
+	window.gameLoaded = false;
+}
+if (typeof window.isGameActive === 'undefined') {
+	window.isGameActive = true;
+}
+if (typeof window.savePromptShown === 'undefined') {
+	window.savePromptShown = false;
+}
+
+// ============================================
 // GAME CONFIGURATION - EDIT THIS SECTION ONLY
 // ============================================
 const GAME_TIMER_SECONDS = (() => {
@@ -736,6 +750,8 @@ const hideSavePrompt = () => {
 window.showSavePrompt = showSavePrompt;
 window.saveStateToBackend = saveStateToBackend;
 window.endSession = endSession;
+window.pauseGame = pauseGame;
+window.resumeGame = resumeGame;
 
 // ============================================
 // GAME INITIALIZATION (MODIFIED)
